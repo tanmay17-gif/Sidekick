@@ -3,14 +3,20 @@
  * Sidekick development stub server.
  *
  * SIMULATED_TEST_ONLY - this is a development double, not the real Sidekick
- * backend. It implements the v1 request/response contract so the web client
- * can be developed, demonstrated and tested before the Core/Execution agents
- * land their services.
+ * backend. It implements the v1 contract closely enough that the browser
+ * client can be developed, demonstrated and tested against it:
  *
- * The capabilities endpoint reports `mode: "stub"` so the browser can label
- * every capability honestly instead of pretending it is live.
+ *   POST /api/v1/requests                  one user turn (JSON or SSE)
+ *   GET  /api/v1/capabilities              the capability inventory
+ *   GET  /api/v1/media/catalog             empty - the client falls back
+ *   GET  /api/v1/actions/{id}              one action and its events
+ *   GET  /api/v1/actions/{id}/events       SSE stream of that action
+ *   POST /api/v1/actions/{id}/approve      approve or refuse (plan_hash bound)
+ *   POST /api/v1/actions/{id}/cancel       cancel one action
+ *   GET  /v1/sessions/{id}                 session state
  *
- * Run:  node dev/stub-server.mjs           (listens on 127.0.0.1:8000)
+ * Everything it executes is labelled SIMULATED in the capability report and in
+ * every result, so the interface can never present it as a live action.
  */
 
 import { createServer } from 'node:http'
@@ -18,59 +24,202 @@ import { randomUUID } from 'node:crypto'
 
 const PORT = Number(process.env.SIDECKICK_STUB_PORT ?? 8000)
 const HOST = process.env.SIDECKICK_STUB_HOST ?? '127.0.0.1'
+const STEP_MS = Number(process.env.SIDECKICK_STUB_STEP_MS ?? 120)
 
-/** sessionId -> { lastPlan, lastRequestId, pendingAction } */
+/** sessionId -> { actions: Map, events: [], lastPlan: [] } */
 const sessions = new Map()
 
-const CAPABILITIES = {
-  contract_version: 'v1',
-  mode: 'stub',
-  capabilities: [
-    { id: 'voice.stt', state: 'live', detail: 'Browser Web Speech API (not Alexa+).' },
-    { id: 'voice.tts', state: 'live', detail: 'Browser Speech Synthesis API.' },
-    { id: 'intent.resolve', state: 'simulated', detail: 'Deterministic rule-based stub resolver.' },
-    { id: 'coding.run', state: 'simulated', detail: 'Stub job that streams a canned diff.' },
-    { id: 'music.play', state: 'unconfigured', detail: 'No music provider credentials configured.' },
-    { id: 'game.chess', state: 'simulated', detail: 'Stub board, no rules engine.' },
-    { id: 'media.play', state: 'live', detail: 'Local media manifest with shipped subtitle cues.' },
-  ],
-  games: [
-    { id: 'chess', name: 'Chess', state: 'simulated', detail: 'Stub position, no rules engine.' },
-  ],
-  providers: [
-    {
-      id: 'spotify',
-      name: 'Spotify',
-      state: 'unconfigured',
-      detail: 'Requires a Spotify developer app id and a user access token.',
-      requires_user_action: true,
-    },
-    {
-      id: 'youtube',
-      name: 'YouTube Music',
-      state: 'unconfigured',
-      detail: 'Requires an OAuth client and a user account with playback access.',
-      requires_user_action: true,
-    },
-  ],
-}
-
-const DESTINATIONS = [
-  { key: 'spotify', tool: 'music.play', label: 'Spotify' },
-  { key: 'youtube', tool: 'music.play', label: 'YouTube' },
-  { key: 'apple music', tool: 'music.play', label: 'Apple Music' },
-  { key: 'netflix', tool: 'media.play', label: 'Netflix' },
-  { key: 'youtube video', tool: 'media.play', label: 'YouTube video' },
+const CAPABILITY_TOOLS = [
+  {
+    tool: 'note.write',
+    description: 'Write a note into the workspace',
+    arguments_schema: { content: { name: 'content', type: 'string', required: true } },
+    approval_required: false,
+    risk_level: 'low',
+    status: 'SIMULATED',
+    status_detail: 'development stub - writes a simulated note',
+  },
+  {
+    tool: 'note.read',
+    description: 'Read the notes in the workspace',
+    arguments_schema: { name: { name: 'name', type: 'string', required: false } },
+    approval_required: false,
+    risk_level: 'low',
+    status: 'SIMULATED',
+    status_detail: 'development stub - reads simulated notes',
+  },
+  {
+    tool: 'timer.set',
+    description: 'Set a timer',
+    arguments_schema: { seconds: { name: 'seconds', type: 'number', required: true } },
+    approval_required: false,
+    risk_level: 'low',
+    status: 'SIMULATED',
+    status_detail: 'development stub - a simulated timer',
+  },
+  {
+    tool: 'timer.list',
+    description: 'List the timers',
+    arguments_schema: {},
+    approval_required: false,
+    risk_level: 'low',
+    status: 'SIMULATED',
+    status_detail: 'development stub - a simulated timer list',
+  },
+  {
+    tool: 'media.open',
+    description: 'Open a media source',
+    arguments_schema: { query: { name: 'query', type: 'string', required: true } },
+    approval_required: false,
+    risk_level: 'low',
+    status: 'SIMULATED',
+    status_detail: 'development stub - opens a simulated media source',
+  },
+  {
+    tool: 'game.chess',
+    description: 'Start or continue a chess game',
+    arguments_schema: { command: { name: 'command', type: 'string', required: true } },
+    approval_required: false,
+    risk_level: 'low',
+    status: 'SIMULATED',
+    status_detail: 'development stub - a simulated board, no rules engine',
+  },
+  {
+    tool: 'music.play',
+    description: 'Play a track on a music provider',
+    arguments_schema: { query: { name: 'query', type: 'string', required: true } },
+    approval_required: false,
+    risk_level: 'low',
+    status: 'NOT_CONFIGURED',
+    status_detail: 'no music provider credentials are configured',
+  },
+  {
+    tool: 'workspace.delete',
+    description: 'Delete a file from the workspace',
+    arguments_schema: { path: { name: 'path', type: 'string', required: true } },
+    approval_required: true,
+    risk_level: 'high',
+    status: 'SIMULATED',
+    status_detail: 'development stub - a simulated destructive action',
+  },
 ]
 
-const RISKY = /\b(delete|remove|drop|terminate|revoke|format|wipe)\b/i
+const SIMULATED_PROVIDER = {
+  name: 'dev-stub',
+  level: 'SIMULATED',
+  simulated: true,
+  available: true,
+  reason: 'development stub',
+  model: 'rule-engine-stub',
+  latency_ms: 12,
+}
 
-function detectDestination(text) {
+function capabilitiesPayload() {
+  return {
+    contract_version: 'v1',
+    mode: 'stub',
+    capabilities: CAPABILITY_TOOLS.map((tool) => ({
+      id: tool.tool,
+      state: tool.status === 'REAL' ? 'live' : tool.status === 'SIMULATED' ? 'simulated' : 'unconfigured',
+      detail: tool.status_detail,
+    })),
+    tools: CAPABILITY_TOOLS,
+    tool_count: CAPABILITY_TOOLS.length,
+    status_counts: CAPABILITY_TOOLS.reduce((counts, tool) => {
+      counts[tool.status] = (counts[tool.status] ?? 0) + 1
+      return counts
+    }, {}),
+    any_simulated: true,
+    games: [{ id: 'chess', name: 'Chess', state: 'simulated', detail: 'development stub board' }],
+    providers: [
+      {
+        id: 'spotify',
+        name: 'Spotify',
+        state: 'unconfigured',
+        detail: 'no provider credentials are configured',
+        requires_user_action: true,
+      },
+    ],
+  }
+}
+
+function sessionFor(sessionId) {
+  let session = sessions.get(sessionId)
+  if (!session) {
+    session = { actions: new Map(), events: [], turns: [] }
+    sessions.set(sessionId, session)
+  }
+  return session
+}
+
+function nowIso() {
+  return new Date().toISOString()
+}
+
+function makeAction(tool, args, extra = {}) {
+  const now = nowIso()
+  return {
+    action_id: randomUUID(),
+    tool,
+    arguments: args,
+    approval_required: Boolean(extra.approval_required),
+    state: extra.state ?? 'pending',
+    superseded_by: null,
+    description: extra.description ?? '',
+    plan_hash: `stub-${tool}-${Math.random().toString(36).slice(2, 10)}`,
+    job_id: extra.job_id ?? null,
+    progress: null,
+    result: null,
+    error: null,
+    timestamps: { created: now, updated: now },
+    ...(extra.description ? {} : {}),
+  }
+}
+
+function recordEvent(session, action, { type, kind, message, status, seq }) {
+  const event = {
+    type,
+    kind,
+    seq,
+    ts: nowIso(),
+    at: nowIso(),
+    action_id: action ? action.action_id : undefined,
+    job_id: action ? action.job_id ?? action.action_id : undefined,
+    tool: action ? action.tool : undefined,
+    status: status ?? (action ? action.state : undefined),
+    message,
+    data: {},
+  }
+  session.events.push(event)
+  return event
+}
+
+/* ------------------------------------------------------------------ *
+ * Intent resolution - deterministic, and clearly a stub.
+ * ------------------------------------------------------------------ */
+
+const DESTINATIONS = [
+  // The core maps every media destination onto `media.open`; the stub does
+  // the same so the development experience matches the real backend.
+  { key: 'spotify', tool: 'media.open' },
+  { key: 'youtube', tool: 'media.open' },
+  { key: 'youtube video', tool: 'media.open' },
+  { key: 'netflix', tool: 'media.open' },
+  { key: 'apple music', tool: 'media.open' },
+]
+
+const RISKY = /\b(delete|remove|drop|terminate|revoke|wipe|erase)\b/i
+
+function detectTool(text) {
   const lower = text.toLowerCase()
-  const found = DESTINATIONS.filter((destination) => lower.includes(destination.key)).sort(
+  const found = DESTINATIONS.filter((entry) => lower.includes(entry.key)).sort(
     (a, b) => b.key.length - a.key.length,
   )
-  return found[0] ?? null
+  if (found.length > 0) return found[0]
+  if (/\b(chess|game)\b/i.test(lower)) return { key: 'chess', tool: 'game.chess' }
+  if (/\b(timer|alarm)\b/i.test(lower)) return { key: 'timer', tool: 'timer.set' }
+  if (/\b(note|memo|remember)\b/i.test(lower)) return { key: 'note', tool: 'note.write' }
+  return null
 }
 
 function splitActions(text) {
@@ -80,154 +229,122 @@ function splitActions(text) {
     .filter((part) => part.length > 0)
 }
 
-function buildAction(tool, args, extra = {}) {
-  const now = new Date().toISOString()
-  return {
-    action_id: randomUUID(),
-    tool,
-    arguments: args,
-    approval_required: Boolean(extra.approval_required),
-    state: extra.state ?? 'pending',
-    superseded_by: null,
-    ...(extra.result !== undefined ? { result: extra.result } : {}),
-    ...(extra.error ? { error: extra.error } : {}),
-    timestamps: { created: now, updated: now },
-  }
-}
-
 /**
- * Deterministic intent resolution. This is a stand-in for the real decision
- * engine - it does not call a model and it does not claim to.
+ * Build the plan for one turn. A correction replaces the earlier destination
+ * before anything executes, exactly as the contract requires.
  */
-function resolve({ utterance, sessionId, requestId, previous }) {
-  const lower = utterance.toLowerCase()
-  const events = []
-  const isCorrection = /\b(no[ ,]?wait|actually|instead|scratch that|sorry)\b/.test(lower)
+function planFor(text, previousPlan) {
+  const corrected = /\b(no[ ,]?wait|actually|instead|scratch that)\b/i.test(text)
+  let segments = splitActions(text)
 
-  let segments = splitActions(utterance)
-  if (isCorrection && previous?.segments?.length) {
-    // A correction replaces the earlier destination before anything executes.
-    const corrected = previous.segments.map((segment) => {
-      const destination = detectDestination(segment)
-      return destination ? segment.replace(destination.key, 'spotify') : segment
-    })
-    segments = corrected
-    events.push({
-      seq: 1,
-      kind: 'log',
-      message: 'Correction detected - the earlier destination was replaced before execution.',
-      at: new Date().toISOString(),
-    })
+  if (corrected && previousPlan && previousPlan.length > 0) {
+    segments = previousPlan.map((segment) =>
+      segment.replace(/\b(youtube|netflix|spotify|apple music)\b/i, 'spotify'),
+    )
   }
 
   const actions = []
   let clarification = null
-  let risk = 'low'
 
   for (const segment of segments) {
-    const destination = detectDestination(segment)
-    if (destination) {
-      const action = buildAction(destination.tool, {
-        query: segment,
-        provider: destination.label,
-      })
-      if (RISKY.test(segment)) {
-        action.approval_required = true
-        action.state = 'awaiting_confirmation'
-        risk = 'high'
+    const detected = detectTool(segment)
+    if (!detected) {
+      clarification = {
+        question: `I am not sure what you mean by "${segment}". Which of these did you want?`,
+        options: ['Play it on Spotify', 'Open it on YouTube', 'Start a chess game', 'Write a note'],
       }
-      actions.push(action)
-      continue
+      break
     }
 
-    if (/\b(chess|game)\b/i.test(segment)) {
-      actions.push(
-        buildAction('game.chess', { command: segment }, {
-          result: {
-            position: {
-              fen: 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1',
-              turn: 'w',
-              last_move: null,
-              selected: null,
-              legal_targets: [],
-            },
-          },
-        }),
-      )
-      continue
-    }
-
-    if (/\b(write|refactor|fix|implement|add a function|patch)\b/i.test(segment)) {
-      actions.push(buildAction('coding.run', { task: segment }, { state: 'running' }))
-      continue
-    }
-
-    if (/\b(hello|hi|who are you|help)\b/i.test(segment)) {
-      actions.push(buildAction('assistant.reply', { message: segment }))
-      continue
-    }
-
-    clarification = {
-      question: `I am not sure what you mean by "${segment}". Which of these did you want?`,
-      options: ['Play it on Spotify', 'Play it on YouTube', 'Start a chess game'],
-    }
-    break
+    const risky = RISKY.test(segment)
+    const tool = risky ? 'workspace.delete' : detected.tool
+    const action = makeAction(tool, { query: segment, path: segment }, {
+      approval_required: risky,
+      state: risky ? 'awaiting_confirmation' : 'pending',
+      description: segment,
+      job_id: randomUUID(),
+    })
+    actions.push(action)
   }
 
   if (actions.length === 0 && !clarification) {
     clarification = {
       question: 'I did not find an action in that request. What should I do?',
-      options: ['Play music on Spotify', 'Watch a film', 'Start a chess game'],
+      options: ['Play music on Spotify', 'Open a video', 'Write a note', 'Start a chess game'],
     }
   }
 
-  const status = actions.some((action) => action.state === 'awaiting_confirmation')
-    ? 'awaiting_confirmation'
-    : actions.length > 0
-      ? 'running'
-      : 'failed'
-
-  if (actions.some((action) => action.state === 'awaiting_confirmation')) {
-    clarification = {
-      question: `This will ${RISKY.test(utterance) ? 'permanently change something' : 'run an action'} on your system. Confirm?`,
-      options: ['Yes, do it', 'No, cancel'],
-    }
-  }
-
-  return {
-    response: {
-      request_id: requestId,
-      session_id: sessionId,
-      intent: {
-        normalized: utterance.trim(),
-        confidence: clarification ? 0.45 : 0.88,
-        ambiguous: Boolean(clarification),
-        entities: [],
-      },
-      action_plan: actions,
-      risk_level: risk,
-      decision_model: {
-        provider: 'sidekick-dev-stub',
-        model: 'deterministic-rules',
-        fallback_used: false,
-      },
-      status,
-      clarification,
-      events,
-      speech: null,
-    },
-    segments,
-  }
+  return { actions, clarification, segments }
 }
 
-const CODING_DIFF = `@@ -1,6 +1,8 @@
- export function greet(name) {
--  return 'Hello ' + name
-+  const trimmed = name.trim()
-+  if (!trimmed) return 'Hello'
-+  return \`Hello \${trimmed}\`
- }
-`
+/**
+ * Execute one action through its lifecycle.
+ *
+ * The state machine is real: pending -> running -> succeeded | failed, with a
+ * cancellation honoured while it is in flight. What it *produces* is labelled
+ * SIMULATED, because that is what it is.
+ */
+function runAction(session, action) {
+  if (action.state === 'awaiting_confirmation') return
+  if (action.state === 'cancelled') return
+
+  action.state = 'running'
+  action.timestamps.updated = nowIso()
+  recordEvent(session, action, {
+    type: 'action.started',
+    kind: 'progress',
+    message: `${action.tool} started`,
+    seq: session.events.length + 1,
+  })
+
+  // A timer genuinely keeps running until it is cancelled, so the interface
+  // has something real to cancel.
+  const duration = action.tool === 'timer.set' ? 8000 : STEP_MS
+
+  setTimeout(() => {
+    if (action.state !== 'running') return
+
+    const tool = CAPABILITY_TOOLS.find((entry) => entry.tool === action.tool)
+    if (tool && tool.status === 'NOT_CONFIGURED') {
+      action.state = 'failed'
+      action.error = {
+        code: 'tool_unavailable',
+        message: `${action.tool} is not configured on this backend`,
+        retryable: false,
+        timeout: false,
+        details: { status_detail: tool.status_detail },
+      }
+      action.timestamps.updated = nowIso()
+      recordEvent(session, action, {
+        type: 'action.failed',
+        kind: 'error',
+        message: action.error.message,
+        seq: session.events.length + 1,
+      })
+      return
+    }
+
+    action.state = 'succeeded'
+    action.progress = 1
+    action.result = {
+      outcome: 'succeeded',
+      summary: `${action.tool} completed in the development stub.`,
+      provider: SIMULATED_PROVIDER,
+      simulated: true,
+    }
+    action.timestamps.updated = nowIso()
+    recordEvent(session, action, {
+      type: 'action.succeeded',
+      kind: 'result',
+      message: `${action.tool} succeeded`,
+      seq: session.events.length + 1,
+    })
+  }, duration)
+}
+
+/* ------------------------------------------------------------------ *
+ * HTTP plumbing
+ * ------------------------------------------------------------------ */
 
 async function readBody(request) {
   const chunks = []
@@ -252,6 +369,12 @@ function sendJson(response, status, payload) {
   response.end(body)
 }
 
+function sendError(response, status, code, message, details = {}) {
+  sendJson(response, status, {
+    error: { code, message, retryable: false, timeout: false, details },
+  })
+}
+
 function sse(response, event) {
   response.write(`data: ${JSON.stringify(event)}\n\n`)
 }
@@ -270,22 +393,133 @@ const server = createServer(async (request, response) => {
   }
 
   if (url.pathname === '/api/v1/capabilities' && request.method === 'GET') {
-    sendJson(response, 200, CAPABILITIES)
+    sendJson(response, 200, capabilitiesPayload())
     return
   }
 
   if (url.pathname === '/api/v1/media/catalog' && request.method === 'GET') {
-    // The media catalog is optional. The client falls back to the film it
-    // ships with, so a 404 here is a supported configuration.
-    sendJson(response, 404, {
-      error: {
-        code: 'not_found',
-        message: 'The dev stub does not publish a media catalog.',
-        retryable: false,
-      },
-    })
+    sendJson(response, 200, { contract_version: 'v1', assets: [] })
     return
   }
+
+  /* ---- action endpoints ---------------------------------------- */
+
+  // The action routes are: the action itself, its event stream, and the two
+  // lifecycle calls. All four shapes have to match, otherwise the approval and
+  // cancellation calls fall through to "no route" and the interface cannot
+  // complete an action.
+  const actionMatch = /^\/api\/v1\/actions\/([^/]+)(\/events|\/approve|\/cancel)?$/.exec(
+    url.pathname,
+  )
+  if (actionMatch) {
+    const actionId = decodeURIComponent(actionMatch[1])
+    const actionRoute = actionMatch[2] ?? ''
+    const isEvents = actionRoute === '/events'
+    const body = request.method === 'POST' ? await readBody(request) : {}
+    const sessionId =
+      body.session_id ??
+      url.searchParams.get('session_id') ??
+      request.headers['x-sidekick-session-id'] ??
+      null
+
+    if (!sessionId) {
+      sendError(response, 422, 'invalid_request', 'the request payload is not valid', {
+        errors: [{ loc: ['body', 'session_id'], msg: 'field required' }],
+      })
+      return
+    }
+
+    const session = sessionFor(sessionId)
+    const action = session.actions.get(actionId)
+    if (!action) {
+      sendError(response, 404, 'not_found', `unknown action: ${actionId}`)
+      return
+    }
+
+    if (isEvents && request.method === 'GET') {
+      const after = Number(url.searchParams.get('after') ?? 0)
+      response.writeHead(200, {
+        'content-type': 'text/event-stream',
+        'cache-control': 'no-cache',
+        connection: 'keep-alive',
+        'access-control-allow-origin': '*',
+      })
+      const relevant = session.events.filter(
+        (event) => event.action_id === actionId && event.seq > after,
+      )
+      for (const event of relevant) sse(response, event)
+      response.end()
+      return
+    }
+
+    if (request.method === 'GET') {
+      sendJson(response, 200, {
+        action,
+        events: session.events.filter((event) => event.action_id === actionId),
+      })
+      return
+    }
+
+    if (request.method === 'POST' && actionRoute === '/approve') {
+      const approved = body.approved ?? body.confirmed ?? true
+      if (action.state !== 'awaiting_confirmation') {
+        sendError(response, 409, 'conflict', 'the action is not waiting for confirmation', {
+          state: action.state,
+        })
+        return
+      }
+      if (body.plan_hash && body.plan_hash !== action.plan_hash) {
+        sendError(response, 409, 'conflict', 'the plan changed before the confirmation arrived', {
+          state: action.state,
+        })
+        return
+      }
+      if (!approved) {
+        action.state = 'cancelled'
+        action.timestamps.updated = nowIso()
+        recordEvent(session, action, {
+          type: 'action.cancelled',
+          kind: 'action_update',
+          message: 'the action was refused',
+          seq: session.events.length + 1,
+        })
+        sendJson(response, 200, { action })
+        return
+      }
+      action.state = 'pending'
+      action.timestamps.updated = nowIso()
+      recordEvent(session, action, {
+        type: 'action.approved',
+        kind: 'action_update',
+        message: 'the action was approved',
+        seq: session.events.length + 1,
+      })
+      runAction(session, action)
+      sendJson(response, 200, { action })
+      return
+    }
+
+    if (request.method === 'POST' && actionRoute === '/cancel') {
+      if (['succeeded', 'failed', 'cancelled'].includes(action.state)) {
+        sendError(response, 409, 'conflict', 'the action already finished', {
+          state: action.state,
+        })
+        return
+      }
+      action.state = 'cancelled'
+      action.timestamps.updated = nowIso()
+      recordEvent(session, action, {
+        type: 'action.cancelled',
+        kind: 'action_update',
+        message: 'the action was cancelled',
+        seq: session.events.length + 1,
+      })
+      sendJson(response, 200, { action })
+      return
+    }
+  }
+
+  /* ---- the request endpoint -------------------------------------- */
 
   if (url.pathname === '/api/v1/requests' && request.method === 'POST') {
     const body = await readBody(request)
@@ -295,27 +529,96 @@ const server = createServer(async (request, response) => {
     const utterance = typeof body.utterance === 'string' ? body.utterance : ''
 
     if (!utterance.trim()) {
-      sendJson(response, 400, {
-        error: { code: 'invalid_request', message: 'utterance must not be empty', retryable: false },
-      })
+      sendError(response, 400, 'invalid_request', 'utterance must not be empty')
       return
     }
 
-    const state = sessions.get(sessionId) ?? { segments: [], pendingAction: null }
-    const { response: payload, segments } = resolve({
-      utterance,
-      sessionId,
-      requestId,
-      previous: state,
-    })
-    sessions.set(sessionId, { segments, pendingAction: null })
+    const session = sessionFor(sessionId)
+    const previousPlan = session.turns.length > 0 ? session.turns[session.turns.length - 1] : []
+    const { actions, clarification, segments } = planFor(utterance, previousPlan)
+    session.turns.push(segments)
+
+    const events = []
+    const push = (type, kind, message, action) => {
+      const event = {
+        type,
+        kind,
+        seq: events.length + 1,
+        ts: nowIso(),
+        at: nowIso(),
+        action_id: action ? action.action_id : undefined,
+        job_id: action ? action.job_id ?? action.action_id : undefined,
+        tool: action ? action.tool : undefined,
+        status: action ? action.state : undefined,
+        message,
+        data: {},
+      }
+      events.push(event)
+      session.events.push(event)
+      return event
+    }
+
+    push('turn.received', 'log', utterance, null)
+    push('model.decided', 'log', 'interpreted with sidekick/rule-engine-stub', null)
+
+    const corrected =
+      /\b(no[ ,]?wait|actually|instead|scratch that)\b/i.test(utterance) &&
+      previousPlan.length > 0
+    if (corrected) {
+      push(
+        'plan.superseded',
+        'log',
+        'the earlier destination was replaced before execution',
+        null,
+      )
+    }
+
+    const awaiting = actions.filter((action) => action.state === 'awaiting_confirmation')
+    if (clarification && actions.length === 0) {
+      push('plan.created', 'log', 'the core asked for one more detail', null)
+    } else {
+      push('plan.created', 'log', `${actions.length} action(s) planned`, actions[0])
+    }
+
+    for (const action of actions) {
+      session.actions.set(action.action_id, action)
+      if (action.state !== 'awaiting_confirmation') runAction(session, action)
+    }
+
+    const status = awaiting.length > 0
+      ? 'awaiting_confirmation'
+      : clarification && actions.length === 0
+        ? 'needs_clarification'
+        : 'running'
+
+    const payload = {
+      request_id: requestId,
+      session_id: sessionId,
+      intent: {
+        normalized: utterance.trim(),
+        confidence: clarification ? 0.45 : 0.88,
+        ambiguous: Boolean(clarification),
+        entities: [],
+      },
+      action_plan: actions,
+      risk_level: awaiting.length > 0 ? 'high' : 'low',
+      decision_model: {
+        provider: 'sidekick-dev-stub',
+        model: 'rule-engine-stub',
+        source: 'rules',
+        fallback_used: false,
+      },
+      status,
+      clarification,
+      events,
+      speech: null,
+    }
 
     const accepts = String(request.headers.accept ?? '')
-    const hasLongRunningAction = payload.action_plan.some((action) => action.tool === 'coding.run')
     const wantsStream = accepts.includes('text/event-stream')
-    const streaming = url.searchParams.get('stream') === '1' || (wantsStream && hasLongRunningAction)
+    const longRunning = actions.some((action) => action.tool === 'workspace.delete')
 
-    if (!streaming) {
+    if (!wantsStream || !longRunning) {
       sendJson(response, 200, payload)
       return
     }
@@ -326,53 +629,39 @@ const server = createServer(async (request, response) => {
       connection: 'keep-alive',
       'access-control-allow-origin': '*',
     })
-
-    const coding = payload.action_plan.find((action) => action.tool === 'coding.run')
-    if (coding) {
-      // Pace the frames like a real worker would, so the client's live
-      // progress state is actually observable.
-      const pace = Number(process.env.SIDECKICK_STUB_PACE_MS ?? 180)
-      const pause = () => new Promise((resolve) => setTimeout(resolve, pace))
-
-      sse(response, { seq: 1, kind: 'progress', message: 'Job queued', at: new Date().toISOString() })
-      await pause()
-      sse(response, {
-        seq: 2,
-        kind: 'progress',
-        message: 'Reading the workspace',
-        at: new Date().toISOString(),
-      })
-      await pause()
-      sse(response, {
-        seq: 3,
-        kind: 'diff',
-        message: 'Patch produced',
-        action_id: coding.action_id,
-        data: { files: [{ path: 'src/greet.ts', diff: CODING_DIFF }] },
-        at: new Date().toISOString(),
-      })
-      await pause()
-      sse(response, {
-        seq: 4,
-        kind: 'result',
-        message: 'Job finished',
-        action_id: coding.action_id,
-        at: new Date().toISOString(),
-      })
-      coding.state = 'succeeded'
-      coding.result = { files: [{ path: 'src/greet.ts', diff: CODING_DIFF }] }
-      payload.status = 'succeeded'
-      await pause()
-    }
-
+    for (const event of events) sse(response, event)
     sse(response, payload)
     response.end()
     return
   }
 
-  sendJson(response, 404, {
-    error: { code: 'not_found', message: `No route for ${request.method} ${url.pathname}`, retryable: false },
-  })
+  /* ---- session view ---------------------------------------------- */
+
+  const sessionMatch = /^\/v1\/sessions\/([^/]+)$/.exec(url.pathname)
+  if (sessionMatch && request.method === 'GET') {
+    const session = sessionFor(decodeURIComponent(sessionMatch[1]))
+    sendJson(response, 200, {
+      session: {
+        session_id: decodeURIComponent(sessionMatch[1]),
+        active_task_id: null,
+        suspended_task_ids: [],
+        turn_count: session.turns.length,
+        last_intent: null,
+        last_tool: null,
+      },
+      tasks: [],
+      actions: [...session.actions.values()],
+      events: session.events,
+    })
+    return
+  }
+
+  if (url.pathname === '/healthz' || url.pathname === '/api/v1/health') {
+    sendJson(response, 200, { status: 'ok', mode: 'stub' })
+    return
+  }
+
+  sendError(response, 404, 'not_found', `No route for ${request.method} ${url.pathname}`)
 })
 
 server.listen(PORT, HOST, () => {

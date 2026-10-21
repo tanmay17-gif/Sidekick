@@ -81,6 +81,47 @@ The raw response payload is one click away (`Raw payload`) for the demo, and
 it is hidden by default so the main surface does not look like a debugging
 tool.
 
+## Action state, ownership and the two interfaces
+
+### The bugs that were fixed, and their actual causes
+
+| Symptom | Root cause | Fix |
+|---|---|---|
+| `No route for POST /api/v1/actions/{id}/cancel` | The **development stub** only matched `GET /actions/{id}` and `GET /actions/{id}/events`; the approve and cancel routes fell through to its catch-all 404. The real core implements both routes. | The stub now matches all four action routes, and the client's error message is the backend's message rather than a raw status. |
+| Cancelling returned 422 | The contract expects **`session_id` in the body** of the approve and cancel calls - the session header is not consulted by those endpoints - and the client was sending `{}`. | The client sends `{ session_id, approved, plan_hash }` for approve and `{ session_id }` for cancel, and parses the `{ action }` envelope those endpoints return. |
+| An old `game.chess` action stayed `PENDING` while a music request was on screen | Two causes: the stub never moved an action past `pending`, and the client showed the whole `action_plan` of a response without separating the actions the current request owns from the ones the backend carried over from an earlier turn. | The stub runs the real lifecycle (pending -> running -> succeeded / failed / cancelled, with cancellation honoured while in flight). The client records which request produced each action id and marks the carried-over ones `inherited`; the conversational surface only ever shows the current request's actions, and the developer view lists the inherited ones separately. |
+| An approval looked like it did nothing | The approval response is `{ action }`, not a `SidekickResponse`, so the client was writing a malformed record back into the state. | The client parses the action envelope, then re-reads the action so the shown state is the backend's, never an optimistic guess. |
+| A new session still showed the previous session's work | The session id was reset but the request list, the action-ownership map and the phase were not. | `resetSession` now clears the requests, the ownership map, the live events, the action errors and the phase, and the speech output is cancelled with it. |
+
+### The states the interface shows
+
+The contract's action states are `pending`, `awaiting_confirmation`, `running`,
+`paused`, `succeeded`, `failed`, `cancelled` and `superseded`. The interface
+adds exactly one derived state, **`timed_out`**, which is a failure whose
+error says it timed out - the contract has no separate state for it, so it is
+derived rather than invented.
+
+An action is only ever shown as succeeded when the backend reported
+`state: "succeeded"`. A request that was merely submitted, acknowledged or
+streamed is never presented as a success.
+
+### What each interface shows
+
+**Interface A - Ask Sidekick / Movie Buddy.** The conversational surface. It
+shows what you said, what Sidekick answered, and what is happening - in plain
+language. It never shows a tool name, a request id, a session uuid, a
+confidence number, a model name or a raw payload. The raw detail lives in the
+developer view.
+
+**Interface B - Developer (Sidekick Live Control Room).** The architecture
+diagram, the request inspector with the real ids and provenance, the task
+timeline fed by the real event stream, the capability health table, and the
+raw payload. The approve / refuse / cancel controls are here as well, and
+they call the real endpoints.
+
+Both interfaces read **one** `useSidekick` instance: the same request list, the
+same session id and the same events.
+
 ## Voice input - real behaviour and limits
 
 `web/src/lib/voice/recognition.ts` wraps `SpeechRecognition` /

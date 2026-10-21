@@ -41,14 +41,14 @@ await page.waitForSelector('.app__bar')
 const apiCaps = await (await fetch(`${apiUrl}/api/v1/capabilities`)).json()
 const toolIds = (apiCaps.capabilities ?? []).map((capability) => capability.id)
 
-const modeBadge = await page.locator('.app__status .badge').innerText()
+const modeBadge = await page.locator('.env-chip').innerText()
 check(
   'the backend mode is reported verbatim',
-  apiCaps.mode === 'stub' ? /dev stub/i.test(modeBadge) : /backend live/i.test(modeBadge),
+  apiCaps.mode === 'stub' ? /dev stub/i.test(modeBadge) : /^live$/i.test(modeBadge.trim()),
   modeBadge,
 )
 
-await page.getByRole('button', { name: 'Control room' }).click()
+await page.getByRole('button', { name: 'Developer' }).click()
 await page.waitForSelector('.health')
 
 const healthText = await page.locator('.health').innerText()
@@ -60,7 +60,7 @@ await page.getByRole('button', { name: 'Ask Sidekick' }).click()
 await page.getByLabel('Your request').fill('take a note that the integration check ran')
 await page.getByRole('button', { name: 'Send' }).click()
 
-await page.waitForSelector('.action-card', { timeout: 30_000 })
+await page.waitForSelector('.task-card', { timeout: 30_000 })
 await page.waitForFunction(
   () => !document.querySelector('.exchange--pending'),
   undefined,
@@ -70,16 +70,16 @@ await page.waitForFunction(
 const errorCount = await page.locator('.exchange--error').count()
 check('the request was answered without a client-side error', errorCount === 0)
 
-const planTools = await page.locator('.action-card__tool').allInnerTexts()
+/* ---- Both interfaces describe the same work ------------------------- */
+await page.getByRole('button', { name: 'Developer' }).click()
+await page.waitForSelector('.control-room__detail')
+
+const planTools = await page.locator('.control-room__ids code').allInnerTexts()
 check(
   'the action plan uses the tool the backend chose',
   planTools.length > 0,
   planTools.join(', '),
 )
-
-/* ---- Both interfaces describe the same work ------------------------- */
-await page.getByRole('button', { name: 'Control room' }).click()
-await page.waitForSelector('.control-room__detail')
 
 const inspector = await page.locator('.control-room__detail').innerText()
 check('the control room shows the same action', planTools.some((tool) => inspector.includes(tool)))

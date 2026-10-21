@@ -30,6 +30,22 @@ web/
   docs/               experience notes, rights evidence, demo script
 ```
 
+## The two interfaces
+
+**Interface A - Ask Sidekick / Movie Buddy.** The voice-first surface a person
+talks to: a large animated companion that reflects what Sidekick is actually
+doing, the exchange in plain language, one prominent microphone and a text
+alternative. No tool names, request ids, session uuids, confidence numbers,
+model names or raw payloads appear here.
+
+**Interface B - Developer (Sidekick Live Control Room).** The live
+architecture diagram, the request inspector, the task timeline fed by the real
+event stream, the capability health table, the approve / cancel controls and
+the raw payload.
+
+Both read the same session, so a request made in one is the same request, the
+same action and the same ids in the other.
+
 ## Run it
 
 ```bash
@@ -70,10 +86,20 @@ node scripts/verify-real-backend.mjs http://127.0.0.1:4178 http://127.0.0.1:8040
 
 Thirteen checks: the backend mode is reported verbatim, every published
 capability is shown, a request is answered by the real engine with the tool it
-chose, both interfaces show the same request and the same ids, the real model
-and confidence are displayed, the architecture diagram does not draw anything
-as live that the backend did not report, the bundled film really loads, and
-nothing threw.
+chose, **both interfaces show the same request and the same ids**, the real
+model and confidence are displayed, the architecture diagram does not draw
+anything as live that the backend did not report, the bundled film really
+loads, and nothing threw.
+
+```bash
+node scripts/verify-real-flow.mjs http://127.0.0.1:4178 http://127.0.0.1:8040
+```
+
+The exact sequence from the brief, against a real backend: start an unrelated
+action, submit *"Open YouTube and play a song - no wait, Spotify."*, confirm
+the music request does not inherit the earlier action, cancel a running action
+and compare the backend's answer with the interface, start a new session and
+confirm nothing is carried over, and capture the normal experience.
 
 ## What is real and what is not
 

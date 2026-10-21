@@ -1,8 +1,9 @@
 import { useMemo, useState } from 'react'
-import type { Action, ProgressEvent } from '@/lib/api/types'
-import type { RequestRecord } from '@/state/useSidekick'
+import type { ProgressEvent } from '@/lib/api/types'
+import type { ActionRecord, RequestRecord } from '@/state/useSidekick'
 import { ArchitectureDiagram } from './ArchitectureDiagram'
 import { ActionCard } from './ActionCard'
+import { ExecutionResultView } from './ExecutionResult'
 import { RefreshIcon } from './icons'
 
 /**
@@ -24,9 +25,11 @@ export interface ControlRoomProps {
   connection: 'checking' | 'connected' | 'disconnected'
   connectionError: string | null
   voiceUnavailable: boolean
+  busyActions: string[]
+  actionErrors: Record<string, string>
   onRefresh: () => void
-  onApprove: (action: Action, approved: boolean) => void
-  onCancelAction: (action: Action) => void
+  onApprove: (record: ActionRecord) => void
+  onCancelAction: (record: ActionRecord) => void
 }
 
 export function ControlRoom(props: ControlRoomProps) {
@@ -39,6 +42,8 @@ export function ControlRoom(props: ControlRoomProps) {
     connection,
     connectionError,
     voiceUnavailable,
+    busyActions,
+    actionErrors,
     onRefresh,
     onApprove,
     onCancelAction,
@@ -54,7 +59,7 @@ export function ControlRoom(props: ControlRoomProps) {
     return requests[requests.length - 1] ?? null
   }, [requests, selectedId])
 
-  const selectedTool = selected?.response?.action_plan?.[0]?.tool ?? null
+  const selectedTool = selected?.actions?.[0]?.action.tool ?? null
 
   return (
     <div className="control-room">
@@ -129,7 +134,15 @@ export function ControlRoom(props: ControlRoomProps) {
                   ))}
               </ul>
 
-              {selected ? <RequestDetail record={selected} onApprove={onApprove} onCancelAction={onCancelAction} /> : null}
+              {selected ? (
+                <RequestDetail
+                  record={selected}
+                  busyActions={busyActions}
+                  actionErrors={actionErrors}
+                  onApprove={onApprove}
+                  onCancelAction={onCancelAction}
+                />
+              ) : null}
             </>
           )}
         </section>
@@ -162,12 +175,16 @@ export function ControlRoom(props: ControlRoomProps) {
 
 function RequestDetail({
   record,
+  busyActions,
+  actionErrors,
   onApprove,
   onCancelAction,
 }: {
   record: RequestRecord
-  onApprove: (action: Action, approved: boolean) => void
-  onCancelAction: (action: Action) => void
+  busyActions: string[]
+  actionErrors: Record<string, string>
+  onApprove: (record: ActionRecord) => void
+  onCancelAction: (record: ActionRecord) => void
 }) {
   const response = record.response
   return (
@@ -233,47 +250,82 @@ function RequestDetail({
         </p>
       ) : null}
 
-      {response?.action_plan?.length ? (
+      {record.actions.length > 0 ? (
         <div className="control-room__plan">
-          {response.action_plan.map((action) => (
-            <div className="control-room__plan-item" key={action.action_id}>
-              <ActionCard action={action} />
+          {record.actions.map((entry) => (
+            <div className="control-room__plan-item" key={entry.action.action_id}>
+              <ActionCard
+                record={entry}
+                busy={busyActions.includes(entry.action.action_id)}
+                error={actionErrors[entry.action.action_id]}
+                onApprove={onApprove}
+                onCancel={onCancelAction}
+              />
               <div className="control-room__plan-actions">
                 <span className="control-room__ids">
-                  action {action.action_id.slice(0, 8)}
-                  {action.job_id ? ` · job ${action.job_id.slice(0, 8)}` : ''}
+                  <code>{entry.action.tool}</code> · action {entry.action.action_id.slice(0, 8)}
+                  {entry.action.job_id ? ` · job ${entry.action.job_id.slice(0, 8)}` : ''}
+                  {entry.action.plan_hash ? ` · plan ${entry.action.plan_hash.slice(0, 8)}` : ''}
+                  {` · ${entry.state}`}
                 </span>
-                {action.state === 'awaiting_confirmation' ? (
+                {entry.state === 'awaiting_confirmation' ? (
                   <>
                     <button
                       type="button"
                       className="btn btn--sm btn--primary"
-                      onClick={() => onApprove(action, true)}
+                      disabled={busyActions.includes(entry.action.action_id)}
+                      onClick={() => onApprove(entry)}
                     >
                       Approve
                     </button>
                     <button
                       type="button"
                       className="btn btn--sm btn--danger"
-                      onClick={() => onApprove(action, false)}
+                      disabled={busyActions.includes(entry.action.action_id)}
+                      onClick={() => onCancelAction(entry)}
                     >
                       Refuse
                     </button>
                   </>
                 ) : null}
-                {action.state === 'running' || action.state === 'pending' ? (
+                {entry.state === 'running' || entry.state === 'pending' ? (
                   <button
                     type="button"
                     className="btn btn--sm btn--danger"
-                    onClick={() => onCancelAction(action)}
+                    disabled={busyActions.includes(entry.action.action_id)}
+                    onClick={() => onCancelAction(entry)}
                   >
                     Cancel action
                   </button>
                 ) : null}
               </div>
+              {entry.action.error ? (
+                <p className="control-room__error">
+                  {entry.action.error.code}: {entry.action.error.message}
+                </p>
+              ) : null}
+              {entry.action.result !== undefined && entry.action.result !== null ? (
+                <ExecutionResultView action={entry.action} />
+              ) : null}
             </div>
           ))}
         </div>
+      ) : null}
+
+      {record.inheritedActions.length > 0 ? (
+        <details className="control-room__inherited">
+          <summary>
+            {record.inheritedActions.length} action(s) carried over from an earlier turn
+          </summary>
+          <ul>
+            {record.inheritedActions.map((entry) => (
+              <li key={entry.action.action_id}>
+                <code>{entry.action.tool}</code> - {entry.state} (from{' '}
+                {entry.request_id.slice(0, 8)})
+              </li>
+            ))}
+          </ul>
+        </details>
       ) : null}
 
       {response ? (

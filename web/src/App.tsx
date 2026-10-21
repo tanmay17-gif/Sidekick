@@ -1,15 +1,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { SidekickClient } from '@/lib/api/client'
 import { containsActivation, parseBuddyCommand } from '@/lib/movie/commands'
 import { NOOP_BUDDY_CONTROLLER, type BuddyController } from '@/lib/movie/controller'
+import { spokenSummary } from '@/lib/ui/language'
 import { useVoiceInput } from '@/lib/voice/useVoiceInput'
 import { Speaker } from '@/lib/voice/synthesis'
-import { useSidekick, type RequestRecord } from '@/state/useSidekick'
+import { useSidekick, type ActionRecord, type RequestRecord } from '@/state/useSidekick'
 import { ControlRoom } from './components/ControlRoom'
 import { MovieBuddy } from './components/MovieBuddy'
 import { SidekickMark } from './components/icons'
 import { VoiceSurface } from './components/VoiceSurface'
-import type { Action } from '@/lib/api/types'
 
 /**
  * Sidekick has two interfaces and one session.
@@ -29,7 +28,6 @@ export function App() {
   const [speaking, setSpeaking] = useState(false)
   const [speechNotice, setSpeechNotice] = useState<string | null>(null)
   const [buddyNote, setBuddyNote] = useState<string | null>(null)
-  const [controlMessage, setControlMessage] = useState<string | null>(null)
   const buddyRef = useRef<BuddyController>(NOOP_BUDDY_CONTROLLER)
   const spokenRef = useRef<string | null>(null)
 
@@ -124,7 +122,7 @@ export function App() {
     if (!sidekick.speakEnabled) return
     const record = sidekick.requests[sidekick.requests.length - 1]
     if (!record || record.status !== 'answered' || !record.response) return
-    const text = summariseResponse(record.response)
+    const text = spokenSummary(record.response)
     if (!text || spokenRef.current === record.request_id) return
     spokenRef.current = record.request_id
     void speaker.speak(text, {
@@ -143,37 +141,32 @@ export function App() {
     sidekick.cancel()
   }, [sidekick, speaker])
 
+  /** A new session starts from silence, with nothing carried over. */
+  const newSession = useCallback(() => {
+    speaker.cancel()
+    setSpeaking(false)
+    setSpeechNotice(null)
+    sidekick.resetSession()
+  }, [sidekick, speaker])
+
   const busy = sidekick.phase === 'thinking' || sidekick.phase === 'executing'
 
   const approve = useCallback(
-    async (action: Action, approved: boolean) => {
-      setControlMessage(null)
-      try {
-        const client = new SidekickClient({ sessionId: sidekick.sessionId })
-        await client.approveAction(action.action_id, action.plan_hash ?? null, approved)
-        await sidekick.refreshCapabilities()
-      } catch (cause) {
-        setControlMessage(
-          cause instanceof Error ? cause.message : 'The approval could not be sent.',
-        )
-      }
+    async (record: ActionRecord) => {
+      await sidekick.approve(
+        record.action.action_id,
+        record.action.plan_hash ?? null,
+        true,
+      )
     },
     [sidekick],
   )
 
   const cancelAction = useCallback(
-    async (action: Action) => {
-      setControlMessage(null)
-      try {
-        const client = new SidekickClient({ sessionId: sidekick.sessionId })
-        await client.cancelAction(action.action_id)
-      } catch (cause) {
-        setControlMessage(
-          cause instanceof Error ? cause.message : 'The cancellation could not be sent.',
-        )
-      }
+    async (record: ActionRecord) => {
+      await sidekick.cancelAction(record.action.action_id)
     },
-    [sidekick.sessionId],
+    [sidekick],
   )
 
   return (
@@ -216,25 +209,22 @@ export function App() {
             aria-current={view === 'control' ? 'page' : undefined}
             onClick={() => setView('control')}
           >
-            Control room
+            Developer
           </button>
         </nav>
 
         <div className="app__status">
-          <span className={`badge badge--${sidekick.connection === 'connected' ? 'live' : 'danger'}`}>
-            {sidekick.connection === 'connected'
-              ? sidekick.capabilities?.mode === 'stub'
-                ? 'dev stub'
-                : 'backend live'
-              : 'offline'}
-          </span>
+          <EnvironmentChip
+            connection={sidekick.connection}
+            mode={sidekick.capabilities?.mode ?? null}
+          />
           <span className="app__session" title={sidekick.sessionId}>
             {sidekick.sessionId.slice(0, 8)}
           </span>
           <button
             type="button"
             className="btn btn--sm btn--ghost"
-            onClick={sidekick.resetSession}
+            onClick={newSession}
             title="Start a new session"
           >
             New session
@@ -255,12 +245,16 @@ export function App() {
             busy={busy}
             connection={sidekick.connection}
             connectionError={sidekick.capabilityError}
+            busyActions={sidekick.busyActions}
+            actionErrors={sidekick.actionErrors}
             onSubmit={handleUtterance}
             onToggleSpeech={sidekick.setSpeakEnabled}
             onInterrupt={interrupt}
             onCancel={sidekick.cancel}
             onRetry={() => void sidekick.refreshCapabilities()}
             onChooseOption={(option) => handleUtterance(option, 'text')}
+            onApprove={approve}
+            onCancelAction={cancelAction}
           />
         ) : null}
 
@@ -291,47 +285,65 @@ export function App() {
             connection={sidekick.connection}
             connectionError={sidekick.capabilityError}
             voiceUnavailable={voice.status === 'unsupported'}
+            busyActions={sidekick.busyActions}
+            actionErrors={sidekick.actionErrors}
             onRefresh={() => void sidekick.refreshCapabilities()}
             onApprove={approve}
             onCancelAction={cancelAction}
           />
         ) : null}
       </main>
-
-      {controlMessage ? (
-        <p className="app__error" role="alert">
-          {controlMessage}
-        </p>
-      ) : null}
     </div>
   )
 }
 
-/** Short spoken summary built from the real backend result. */
-export function summariseResponse(response: {
-  speech?: string | null
-  clarification: { question: string } | null
-  action_plan: Array<{ tool: string; state: string; error?: { message: string } | null }>
-}): string {
-  if (response.speech) return response.speech
-  if (response.clarification) return response.clarification.question
-
-  const failed = response.action_plan.find((action) => action.state === 'failed')
-  if (failed) {
-    return failed.error
-      ? `${failed.tool} failed: ${failed.error.message}`
-      : `${failed.tool} failed.`
+/**
+ * The environment chip.
+ *
+ * A development stub must be identifiable, but it must not dominate the
+ * product - so it is a small, quiet marker rather than a banner.
+ */
+function EnvironmentChip({
+  connection,
+  mode,
+}: {
+  connection: 'checking' | 'connected' | 'disconnected'
+  mode: string | null
+}) {
+  if (connection === 'disconnected') {
+    return (
+      <span className="env-chip env-chip--off" title="The backend is not reachable">
+        <span className="dot" data-tone="danger" />
+        offline
+      </span>
+    )
   }
-
-  const waiting = response.action_plan.find((action) => action.state === 'awaiting_confirmation')
-  if (waiting) return `${waiting.tool} needs your confirmation before it runs.`
-
-  const done = response.action_plan.find((action) => action.state === 'succeeded')
-  if (done) return `${done.tool} completed.`
-
-  if (response.action_plan.length === 0) return 'I did not find an action to take.'
-
-  return `Working on ${response.action_plan.map((action) => action.tool).join(', ')}.`
+  if (connection === 'checking') {
+    return (
+      <span className="env-chip" title="Checking the backend">
+        <span className="dot" data-tone="muted" />
+        connecting
+      </span>
+    )
+  }
+  if (mode === 'stub') {
+    return (
+      <span
+        className="env-chip env-chip--stub"
+        title="This is the development stub backend, not the real Sidekick core. Everything it runs is labelled simulated."
+      >
+        <span className="dot" data-tone="simulated" />
+        dev stub
+      </span>
+    )
+  }
+  return (
+    <span className="env-chip env-chip--live" title="Connected to the real backend">
+      <span className="dot" data-tone="live" />
+      live
+    </span>
+  )
 }
+
 
 export type { RequestRecord }

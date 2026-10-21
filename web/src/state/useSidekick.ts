@@ -3,6 +3,8 @@ import { SidekickClient } from '@/lib/api/client'
 import { ENDPOINTS } from '@/lib/api/endpoints'
 import { describeApiError, SidekickApiError } from '@/lib/api/errors'
 import type {
+  Action,
+  ActionState,
   CapabilitiesResponse,
   ProgressEvent,
   SidekickRequest,
@@ -22,11 +24,48 @@ export type Phase =
 export type ConnectionState = 'checking' | 'connected' | 'disconnected'
 
 /**
- * One request as the whole product sees it.
+ * The state the interface shows for an action.
  *
- * Both surfaces read this list, so the conversation and the control room are
- * always describing the same real work.
+ * `timed_out` is not a separate state in the contract - it is a failure whose
+ * error says it timed out. Deriving it here keeps the distinction the product
+ * needs without inventing a backend state.
  */
+export type ActionViewState =
+  | 'pending'
+  | 'awaiting_confirmation'
+  | 'running'
+  | 'paused'
+  | 'succeeded'
+  | 'failed'
+  | 'timed_out'
+  | 'cancelled'
+  | 'superseded'
+  | 'unknown'
+
+export function deriveActionState(action: Action): ActionViewState {
+  if (action.state === 'failed' && action.error?.timeout) return 'timed_out'
+  if (action.state === 'failed') return 'failed'
+  return action.state as ActionViewState
+}
+
+/**
+ * One action, and where it came from.
+ *
+ * The contract's `Action` has no request id, so the client records which
+ * request produced each action. An action that the backend carried over from
+ * an earlier turn of the same session is flagged `inherited` and is never
+ * presented as part of the current request.
+ */
+export interface ActionRecord {
+  action: Action
+  request_id: string
+  session_id: string
+  /** True when this action was produced by an earlier request. */
+  inherited: boolean
+  state: ActionViewState
+}
+
+/** One request as the whole product sees it. */
 export interface RequestRecord {
   request_id: string
   session_id: string
@@ -36,6 +75,10 @@ export interface RequestRecord {
   finished_at: string | null
   status: 'in_flight' | 'answered' | 'failed'
   response: SidekickResponse | null
+  /** The actions this request is responsible for, in plan order. */
+  actions: ActionRecord[]
+  /** Actions the backend carried over from an earlier turn. */
+  inheritedActions: ActionRecord[]
   events: ProgressEvent[]
   error: { code: string; message: string; retryable: boolean; timeout: boolean } | null
 }
@@ -61,13 +104,12 @@ export function looksLikeCorrection(text: string): boolean {
 }
 
 /** The action the control room should follow: the first one still moving. */
-export function liveActionOf(record: RequestRecord | null): string | null {
+export function liveActionOf(record: RequestRecord | null): ActionRecord | null {
   if (!record) return null
-  const running = record.response?.action_plan?.find(
-    (action) => action.state === 'running' || action.state === 'pending',
+  const moving = record.actions.find(
+    (entry) => entry.state === 'running' || entry.state === 'pending',
   )
-  if (running) return running.job_id ?? running.action_id
-  return null
+  return moving ?? null
 }
 
 export function useSidekick(options: UseSidekickOptions = {}) {
@@ -82,6 +124,10 @@ export function useSidekick(options: UseSidekickOptions = {}) {
   const [liveEvents, setLiveEvents] = useState<ProgressEvent[]>([])
   /** The action whose event stream the control room is following. */
   const [followedAction, setFollowedAction] = useState<string | null>(null)
+  /** Actions with an approval or cancellation in flight. */
+  const [busyActions, setBusyActions] = useState<string[]>([])
+  /** A friendly, user-facing failure per action. */
+  const [actionErrors, setActionErrors] = useState<Record<string, string>>({})
 
   const clientRef = useRef<SidekickClient | null>(null)
   if (clientRef.current === null) {
@@ -97,6 +143,8 @@ export function useSidekick(options: UseSidekickOptions = {}) {
 
   const lastResponseRef = useRef<SidekickResponse | null>(null)
   const inFlightRef = useRef<AbortController | null>(null)
+  /** action_id -> the request that produced it. */
+  const actionOwnerRef = useRef<Map<string, string>>(new Map())
 
   const refreshCapabilities = useCallback(async () => {
     setConnection('checking')
@@ -116,6 +164,47 @@ export function useSidekick(options: UseSidekickOptions = {}) {
     void refreshCapabilities()
   }, [refreshCapabilities])
 
+  /** Split a plan into the actions this request owns and the ones it inherited. */
+  const attributeActions = useCallback(
+    (response: SidekickResponse, requestId: string, session: string) => {
+      const owned: ActionRecord[] = []
+      const inherited: ActionRecord[] = []
+      for (const action of response.action_plan ?? []) {
+        const owner = actionOwnerRef.current.get(action.action_id)
+        const isInherited = owner !== undefined && owner !== requestId
+        if (!isInherited) actionOwnerRef.current.set(action.action_id, requestId)
+        const record: ActionRecord = {
+          action,
+          request_id: isInherited ? owner : requestId,
+          session_id: session,
+          inherited: isInherited,
+          state: deriveActionState(action),
+        }
+        if (isInherited) inherited.push(record)
+        else owned.push(record)
+      }
+      return { owned, inherited }
+    },
+    [],
+  )
+
+  /** Replace one action everywhere it appears, keeping its ownership. */
+  const replaceAction = useCallback((action: Action) => {
+    setRequests((existing) =>
+      existing.map((record) => {
+        const patch = (entry: ActionRecord): ActionRecord =>
+          entry.action.action_id === action.action_id
+            ? { ...entry, action, state: deriveActionState(action) }
+            : entry
+        return {
+          ...record,
+          actions: record.actions.map(patch),
+          inheritedActions: record.inheritedActions.map(patch),
+        }
+      }),
+    )
+  }, [])
+
   const send = useCallback(
     async (utterance: string, inputSource: 'voice' | 'text') => {
       const trimmed = utterance.trim()
@@ -132,6 +221,8 @@ export function useSidekick(options: UseSidekickOptions = {}) {
         finished_at: null,
         status: 'in_flight',
         response: null,
+        actions: [],
+        inheritedActions: [],
         events: [],
         error: null,
       }
@@ -177,6 +268,7 @@ export function useSidekick(options: UseSidekickOptions = {}) {
         )
 
         lastResponseRef.current = response
+        const { owned, inherited } = attributeActions(response, requestId, sessionId)
         setRequests((existing) =>
           existing.map((entry) =>
             entry.request_id === requestId
@@ -184,6 +276,8 @@ export function useSidekick(options: UseSidekickOptions = {}) {
                   ...entry,
                   status: 'answered',
                   response,
+                  actions: owned,
+                  inheritedActions: inherited,
                   events,
                   finished_at: new Date().toISOString(),
                 }
@@ -231,7 +325,7 @@ export function useSidekick(options: UseSidekickOptions = {}) {
         inFlightRef.current = null
       }
     },
-    [client, sessionId],
+    [attributeActions, client, sessionId],
   )
 
   const cancel = useCallback(() => {
@@ -251,9 +345,102 @@ export function useSidekick(options: UseSidekickOptions = {}) {
     })
     setRequests([])
     setLiveEvents([])
+    setPhase('idle')
+    setActionErrors({})
+    setBusyActions([])
+    setFollowedAction(null)
+    actionOwnerRef.current = new Map()
     lastResponseRef.current = null
     void refreshCapabilities()
   }, [cancel, options.baseUrl, options.fetchImpl, refreshCapabilities])
+
+  /* ---------------------------------------------------------------- *
+   * Approval and cancellation.
+   *
+   * The action is re-read after the call, so the interface always shows the
+   * state the backend reports - never an optimistic guess.
+   * ---------------------------------------------------------------- */
+  const approve = useCallback(
+    async (actionId: string, planHash: string | null, approved: boolean) => {
+      if (busyActions.includes(actionId)) return null
+      setBusyActions((current) => [...current, actionId])
+      setActionErrors((current) => {
+        const next = { ...current }
+        delete next[actionId]
+        return next
+      })
+      try {
+        const envelope = await client.approveAction(
+          actionId,
+          sessionId,
+          planHash,
+          approved,
+        )
+        replaceAction(envelope.action)
+        // Re-read the action so the shown state is the backend's, not ours.
+        try {
+          const fresh = await client.actionState(actionId, sessionId)
+          replaceAction(fresh.action)
+        } catch {
+          /* the envelope already carries the authoritative action */
+        }
+        return envelope.action
+      } catch (cause) {
+        const message = describeApiError(cause)
+        setActionErrors((current) => ({ ...current, [actionId]: message }))
+        return null
+      } finally {
+        setBusyActions((current) => current.filter((id) => id !== actionId))
+      }
+    },
+    [busyActions, client, replaceAction, sessionId],
+  )
+
+  const cancelAction = useCallback(
+    async (actionId: string) => {
+      if (busyActions.includes(actionId)) return null
+      setBusyActions((current) => [...current, actionId])
+      setActionErrors((current) => {
+        const next = { ...current }
+        delete next[actionId]
+        return next
+      })
+      try {
+        const envelope = await client.cancelAction(actionId, sessionId)
+        replaceAction(envelope.action)
+        try {
+          const fresh = await client.actionState(actionId, sessionId)
+          replaceAction(fresh.action)
+        } catch {
+          /* the envelope already carries the authoritative action */
+        }
+        return envelope.action
+      } catch (cause) {
+        const message = describeApiError(cause)
+        setActionErrors((current) => ({ ...current, [actionId]: message }))
+        return null
+      } finally {
+        setBusyActions((current) => current.filter((id) => id !== actionId))
+      }
+    },
+    [busyActions, client, replaceAction, sessionId],
+  )
+
+  /** Re-read one action - used after a reconnect or a manual refresh. */
+  const refreshAction = useCallback(
+    async (actionId: string) => {
+      try {
+        const fresh = await client.actionState(actionId, sessionId)
+        replaceAction(fresh.action)
+        return fresh.action
+      } catch (cause) {
+        const message = describeApiError(cause)
+        setActionErrors((current) => ({ ...current, [actionId]: message }))
+        return null
+      }
+    },
+    [client, replaceAction, sessionId],
+  )
 
   /* ---------------------------------------------------------------- *
    * The control room follows the real event stream of the running
@@ -268,7 +455,7 @@ export function useSidekick(options: UseSidekickOptions = {}) {
       setFollowedAction(null)
       return
     }
-    setFollowedAction(actionToFollow)
+    setFollowedAction(actionToFollow.action.action_id)
 
     let cancelled = false
     let controller: AbortController | null = null
@@ -280,7 +467,7 @@ export function useSidekick(options: UseSidekickOptions = {}) {
         controller = new AbortController()
         try {
           const events = await client.actionEvents(
-            actionToFollow,
+            actionToFollow.action.action_id,
             lastSeq > 0 ? lastSeq : null,
             {
               onEvent: (event) => {
@@ -296,8 +483,11 @@ export function useSidekick(options: UseSidekickOptions = {}) {
           )
           if (events.length > 0) {
             attempt = 0
+            // The stream may have carried the action's final state.
+            if (events.some((event) => event.status === 'succeeded' || event.status === 'failed')) {
+              await refreshAction(actionToFollow.action.action_id)
+            }
           }
-          // A finished stream stays open for the next request to follow.
           break
         } catch {
           attempt += 1
@@ -312,12 +502,9 @@ export function useSidekick(options: UseSidekickOptions = {}) {
       cancelled = true
       controller?.abort()
     }
-  }, [actionToFollow, client, requests.length])
+  }, [actionToFollow, client, refreshAction, requests.length])
 
-  const liveRequest = useMemo(
-    () => requests[requests.length - 1] ?? null,
-    [requests],
-  )
+  const liveRequest = useMemo(() => requests[requests.length - 1] ?? null, [requests])
 
   return {
     sessionId,
@@ -331,10 +518,17 @@ export function useSidekick(options: UseSidekickOptions = {}) {
     capabilityError,
     speakEnabled,
     setSpeakEnabled,
+    busyActions,
+    actionErrors,
     send,
     cancel,
     resetSession,
     refreshCapabilities,
+    approve,
+    cancelAction,
+    refreshAction,
     mediaCatalogPath: ENDPOINTS.mediaCatalog,
   }
 }
+
+export type { ActionState }

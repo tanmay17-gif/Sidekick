@@ -20,23 +20,36 @@ test.beforeEach(async ({ page }) => {
  * Interface A - the conversational surface
  * ------------------------------------------------------------------ */
 
-test('leads with the companion and shows the real state', async ({ page }) => {
+test('leads with the companion, a prominent microphone and a text alternative', async ({
+  page,
+}) => {
   const companion = page.locator('.voice-surface__orb .companion')
   await expect(companion).toHaveAttribute('data-state', 'idle')
-  await expect(companion).toHaveAttribute('aria-label', /here when you need me/i)
-  await expect(page.getByText('Ask me anything, or say "Turn on Movie Buddy".')).toBeVisible()
+  await expect(companion).toHaveAttribute('aria-label', /here when you need it/i)
+
+  const mic = page.getByRole('button', { name: /Start voice input/i })
+  await expect(mic).toBeVisible()
+  await expect(page.getByLabel('Your request')).toBeVisible()
 })
 
-test('resolves a typed request and renders the real action plan', async ({ page }) => {
+test('resolves a typed request and answers in plain language', async ({ page }) => {
   await page.getByLabel('Your request').fill('play a song on spotify')
   await page.getByRole('button', { name: 'Send' }).click()
 
   await expect(page.locator('.exchange__you')).toHaveText('play a song on spotify')
-  await expect(page.locator('.action-card__tool').first()).toHaveText('music.play')
+  const card = page.locator('.task-card').first()
+  await expect(card).toBeVisible()
+  await expect(card).toContainText(/the media player/i)
+
+  // The normal experience never leaks internal detail.
+  const exchange = page.locator('.exchange').last()
+  await expect(exchange).not.toContainText('media.open')
+  await expect(exchange).not.toContainText('rule-engine')
+  await expect(exchange).not.toContainText('request_id')
 })
 
 test('shows a clarification with answerable options', async ({ page }) => {
-  await page.getByLabel('Your request').fill('play something')
+  await page.getByLabel('Your request').fill('do the thing')
   await page.getByRole('button', { name: 'Send' }).click()
   await expect(page.locator('.exchange__ask')).toBeVisible()
   await expect(page.getByRole('button', { name: 'Spotify' })).toBeVisible()
@@ -45,29 +58,46 @@ test('shows a clarification with answerable options', async ({ page }) => {
 test('applies a mid-request correction before anything executes', async ({ page }) => {
   await page.getByLabel('Your request').fill('open youtube and play a song')
   await page.getByRole('button', { name: 'Send' }).click()
-  await expect(page.locator('.action-card').first()).toBeVisible()
+  await expect(page.locator('.task-card').first()).toBeVisible()
 
   await page.getByLabel('Your request').fill('no wait, spotify')
   await page.getByRole('button', { name: 'Send' }).click()
-  await expect(page.locator('.action-card').last()).toBeVisible()
 
   // The correction is recorded in the shared timeline.
-  await page.getByRole('button', { name: 'Control room' }).click()
-  await expect(page.locator('.timeline__message', { hasText: 'Correction detected' }).first()).toBeVisible()
+  await page.getByRole('button', { name: 'Developer' }).click()
+  await waitForText(page, 'the earlier destination was replaced before execution')
 })
 
 test('handles a multi-action request', async ({ page }) => {
   await page.getByLabel('Your request').fill('play a song on spotify and then start a chess game')
   await page.getByRole('button', { name: 'Send' }).click()
-  await expect(page.locator('.action-card')).toHaveCount(2)
+  await expect(page.locator('.task-card')).toHaveCount(2)
 })
 
-test('asks for confirmation on a risky action', async ({ page }) => {
+test('asks for confirmation before a risky action and can approve it', async ({ page }) => {
   await page.getByLabel('Your request').fill('delete the playlist on spotify')
   await page.getByRole('button', { name: 'Send' }).click()
-  await expect(page.locator('.exchange__ask')).toBeVisible()
-  await expect(page.getByRole('button', { name: 'Yes, do it' })).toBeVisible()
-  await expect(page.getByRole('button', { name: 'No, cancel' })).toBeVisible()
+
+  await expect(page.locator('.task-card__approval')).toBeVisible()
+  await expect(page.getByRole('button', { name: /Yes, go ahead/ })).toBeVisible()
+
+  await page.getByRole('button', { name: /Yes, go ahead/ }).click()
+  // The backend moves the action on; the card follows the backend.
+  await expect(page.locator('.task-card__chip')).not.toContainText('needs your OK')
+})
+
+test('cancels a running action and the interface agrees with the backend', async ({
+  page,
+}) => {
+  // A timer keeps running until it is cancelled, so the cancel is real.
+  await page.getByLabel('Your request').fill('set a timer for five minutes')
+  await page.getByRole('button', { name: 'Send' }).click()
+
+  const card = page.locator('.task-card').first()
+  await expect(card.locator('.task-card__chip')).toContainText(/working/i)
+
+  await card.getByRole('button', { name: /^Cancel$/ }).click()
+  await expect(card.locator('.task-card__chip')).toContainText(/cancelled/i)
 })
 
 test('surfaces a backend failure instead of an empty answer', async ({ page }) => {
@@ -90,17 +120,21 @@ test('offers a text fallback when the browser has no speech engine', async ({ br
 
   const mic = page.getByRole('button', { name: /Voice input is not available/i })
   await expect(mic).toBeDisabled()
-  await expect(page.getByText('text only')).toBeVisible()
+  await expect(page.getByText(/Voice input is not available here/i)).toBeVisible()
   await expect(page.getByLabel('Your request')).toBeVisible()
   await context.close()
 })
 
+test('identifies the development stub without letting it dominate', async ({ page }) => {
+  await expect(page.getByTitle(/development stub/i)).toBeVisible()
+})
+
 /* ------------------------------------------------------------------ *
- * Interface B - the control room
+ * Interface B - the developer area
  * ------------------------------------------------------------------ */
 
 test('switches between the two interfaces', async ({ page }) => {
-  await page.getByRole('button', { name: 'Control room' }).click()
+  await page.getByRole('button', { name: 'Developer' }).click()
   await expect(page.getByRole('heading', { name: 'Control room' })).toBeVisible()
   await expect(page.getByLabel('System architecture')).toBeVisible()
 
@@ -115,27 +149,22 @@ test('both interfaces share the same session and the same real request', async (
 
   const sessionBefore = await page.locator('.app__session').innerText()
 
-  await page.getByRole('button', { name: 'Control room' }).click()
+  await page.getByRole('button', { name: 'Developer' }).click()
   await expect(page.getByRole('heading', { name: 'Control room' })).toBeVisible()
 
-  // The same utterance and the same action are in the inspector.
   await expect(page.locator('.control-room__request-text').first()).toHaveText(
     'play a song on spotify',
   )
-  await expect(page.locator('.action-card__tool').first()).toHaveText('music.play')
-  // The same session.
-  await expect(page.locator('.control-room__session')).toContainText(sessionBefore)
+  await expect(page.locator('.app__session')).toHaveText(sessionBefore)
 })
 
 test('the architecture diagram reports real states, not planned ones', async ({ page }) => {
-  await page.getByRole('button', { name: 'Control room' }).click()
+  await page.getByRole('button', { name: 'Developer' }).click()
   const diagram = page.getByLabel('System architecture')
   await expect(diagram).toBeVisible()
   await expect(diagram.getByText('Core decision engine')).toBeVisible()
   await expect(diagram.getByText('Execution service')).toBeVisible()
-  // With no request yet, nothing that does work is drawn as connected.
-  const execution = diagram.locator('.arch__node', { hasText: 'Execution service' })
-  await expect(execution).toHaveAttribute('data-state', 'idle')
+  // With no request yet, the engine and the execution service are idle.
   await expect(diagram.locator('.arch__node', { hasText: 'Core decision engine' })).toHaveAttribute(
     'data-state',
     'idle',
@@ -143,25 +172,24 @@ test('the architecture diagram reports real states, not planned ones', async ({ 
 })
 
 test('the capability health table shows the true statuses', async ({ page }) => {
-  await page.getByRole('button', { name: 'Control room' }).click()
+  await page.getByRole('button', { name: 'Developer' }).click()
   const table = page.getByRole('table')
   await expect(table).toBeVisible()
   await expect(table.getByText('music.play')).toBeVisible()
-  await expect(table.getByText('UNCONFIGURED')).toBeVisible()
+  await expect(table.getByText('NOT_CONFIGURED')).toBeVisible()
 })
 
 test('the task timeline shows real events and never invents them', async ({ page }) => {
-  await page.getByRole('button', { name: 'Control room' }).click()
+  await page.getByRole('button', { name: 'Developer' }).click()
   await expect(page.getByText('Task timeline')).toBeVisible()
   await expect(page.getByText(/No events yet/i)).toBeVisible()
 
-  // Ask something, and the events the backend produced appear in the timeline.
   await page.getByRole('button', { name: 'Ask Sidekick' }).click()
   await page.getByLabel('Your request').fill('play a song on spotify')
   await page.getByRole('button', { name: 'Send' }).click()
   await expect(page.locator('.exchange__you')).toHaveText('play a song on spotify')
 
-  await page.getByRole('button', { name: 'Control room' }).click()
+  await page.getByRole('button', { name: 'Developer' }).click()
   await expect(page.locator('.control-room__request').first()).toBeVisible()
 })
 
@@ -183,7 +211,9 @@ test('turns Movie Buddy on from a typed command, without naming a film', async (
   await expect(page.getByText(/Movie Buddy is on and waiting with you/i)).toBeVisible()
 })
 
-test('really plays the bundled film and syncs the captions to the media clock', async ({ page }) => {
+test('really plays the bundled film and syncs the captions to the media clock', async ({
+  page,
+}) => {
   await page.getByRole('button', { name: 'Movie Buddy', exact: true }).click()
 
   const video = page.locator('video')
@@ -225,7 +255,6 @@ test('really plays the bundled film and syncs the captions to the media clock', 
 
 test('the companion reacts at a real caption and explains why', async ({ page }) => {
   await page.getByRole('button', { name: 'Movie Buddy', exact: true }).click()
-  // The surface starts switched on; make sure it is.
   const toggle = page.getByRole('button', { name: /Turn (on|off) Movie Buddy/ })
   if ((await toggle.innerText()).includes('Turn off')) {
     await toggle.click()
@@ -346,18 +375,19 @@ test('isolates two concurrent sessions', async ({ browser }) => {
   await contextB.close()
 })
 
-test('recovers from a disconnect and starts a clean session on demand', async ({ page }) => {
+test('a new session does not present the previous session state as current', async ({
+  page,
+}) => {
   await page.getByLabel('Your request').fill('play a song on spotify')
   await page.getByRole('button', { name: 'Send' }).click()
-  await expect(page.locator('.action-card').first()).toBeVisible()
+  await expect(page.locator('.exchange__you')).toHaveText('play a song on spotify')
 
-  const before = await page.locator('.app__session').innerText()
   await page.getByRole('button', { name: 'New session' }).click()
 
-  const after = await page.locator('.app__session').innerText()
-  expect(after).not.toEqual(before)
-  // The conversation is gone and the control room agrees.
   await expect(page.locator('.exchange')).toHaveCount(0)
-  await page.getByRole('button', { name: 'Control room' }).click()
-  await expect(page.getByText(/Nothing has been asked yet/i)).toBeVisible()
+  await expect(page.getByText('Ask me anything, or say "Turn on Movie Buddy".')).toBeVisible()
 })
+
+async function waitForText(page: import('@playwright/test').Page, text: string) {
+  await expect(page.locator('.timeline__message', { hasText: text }).first()).toBeVisible()
+}

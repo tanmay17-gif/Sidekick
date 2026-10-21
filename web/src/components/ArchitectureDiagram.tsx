@@ -56,7 +56,6 @@ export function ArchitectureDiagram({
     </section>
   )
 }
-
 function buildNodes(input: {
   capabilities: CapabilitiesResponse | null
   response: SidekickResponse | null
@@ -65,11 +64,6 @@ function buildNodes(input: {
   voiceUnavailable: boolean
 }): DiagramNode[] {
   const { capabilities, response, tool, disconnected, voiceUnavailable } = input
-
-  const voiceCapability = capabilities?.capabilities?.find(
-    (capability) => capability.id === 'voice.stt' || capability.id === 'voice.tts',
-  )
-  const toolDescriptor = capabilities?.tools?.find((entry) => entry.tool === tool)
 
   const engineState: NodeState = disconnected
     ? 'unavailable'
@@ -80,12 +74,10 @@ function buildNodes(input: {
   const safetyState: NodeState = disconnected
     ? 'unavailable'
     : response
-      ? response.action_plan.some((action) => action.approval_required) ||
-        response.risk_level === 'high' ||
-        response.risk_level === 'irreversible'
-        ? 'connected'
-        : 'connected'
+      ? 'connected'
       : 'idle'
+
+  const toolDescriptor = capabilities?.tools?.find((entry) => entry.tool === tool)
 
   const adapterState: NodeState = disconnected
     ? 'unavailable'
@@ -125,16 +117,17 @@ function buildNodes(input: {
     {
       id: 'voice',
       label: 'Voice UI',
+      // The speech engine is a browser capability, not a backend one - the
+      // backend says nothing about it, so the browser is the only honest
+      // source for its state.
       detail: voiceUnavailable
         ? 'no speech engine in this browser'
-        : (voiceCapability?.detail ?? 'browser Web Speech API'),
+        : 'browser speech recognition and synthesis',
       state: disconnected
         ? 'unavailable'
         : voiceUnavailable
           ? 'unavailable'
-          : (voiceCapability?.state ?? 'idle') === 'live'
-            ? 'connected'
-            : 'unconfigured',
+          : 'connected',
     },
     {
       id: 'core',

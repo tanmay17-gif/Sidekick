@@ -15,6 +15,11 @@ export interface ComposerProps {
   onSubmit: (text: string, source: 'voice' | 'text') => void
   onInterrupt: () => void
   disabled?: boolean
+  /**
+   * Hide the composer's own microphone. Interface A shows one large,
+   * prominent microphone of its own, and two of them is confusing.
+   */
+  showMic?: boolean
 }
 
 export function Composer({
@@ -27,6 +32,7 @@ export function Composer({
   onSubmit,
   onInterrupt,
   disabled,
+  showMic = true,
 }: ComposerProps) {
   const [text, setText] = useState('')
   const textareaRef = useRef<HTMLTextAreaElement | null>(null)
@@ -68,25 +74,27 @@ export function Composer({
           submit()
         }}
       >
-        <button
-          type="button"
-          className="mic"
-          data-mode={voice.status === 'unsupported' ? 'unavailable' : micMode}
-          disabled={micDisabled}
-          aria-label={micLabel}
-          title={micLabel}
-          onClick={() => {
-            if (speaking) {
-              onInterrupt()
-              return
-            }
-            if (voice.status === 'listening') voice.stop()
-            else voice.start()
-          }}
-        >
-          <span className="mic__pulse" aria-hidden="true" />
-          {voice.status === 'unsupported' ? <MicOffIcon size={18} /> : <MicIcon size={18} />}
-        </button>
+        {showMic ? (
+          <button
+            type="button"
+            className="mic"
+            data-mode={voice.status === 'unsupported' ? 'unavailable' : micMode}
+            disabled={micDisabled}
+            aria-label={micLabel}
+            title={micLabel}
+            onClick={() => {
+              if (speaking) {
+                onInterrupt()
+                return
+              }
+              if (voice.status === 'listening') voice.stop()
+              else voice.start()
+            }}
+          >
+            <span className="mic__pulse" aria-hidden="true" />
+            {voice.status === 'unsupported' ? <MicOffIcon size={18} /> : <MicIcon size={18} />}
+          </button>
+        ) : null}
 
         <label className="sr-only" htmlFor="composer-input">
           Your request

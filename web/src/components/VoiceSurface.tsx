@@ -1,17 +1,16 @@
 import { useEffect, useMemo, useRef } from 'react'
-import type { Action } from '@/lib/api/types'
-import type { RequestRecord } from '@/state/useSidekick'
+import type { ActionRecord, RequestRecord } from '@/state/useSidekick'
 import { Companion, type CompanionState } from './Companion'
-import { Composer } from './Composer'
 import { ActionCard } from './ActionCard'
-import { MicIcon, StopIcon } from './icons'
+import { Composer } from './Composer'
+import { AlertIcon, MicIcon, StopIcon } from './icons'
 
 /**
  * Interface A - the conversational surface.
  *
  * The shape is deliberately simple, like a voice assistant: one large
- * companion, the exchange underneath, one input. Everything that is not the
- * conversation lives in the control room.
+ * companion, the exchange underneath, one input. Everything technical lives in
+ * the developer view.
  */
 
 export interface VoiceSurfaceProps {
@@ -25,12 +24,16 @@ export interface VoiceSurfaceProps {
   busy: boolean
   connection: 'checking' | 'connected' | 'disconnected'
   connectionError: string | null
+  busyActions: string[]
+  actionErrors: Record<string, string>
   onSubmit: (text: string, source: 'voice' | 'text') => void
   onToggleSpeech: (next: boolean) => void
   onInterrupt: () => void
   onCancel: () => void
   onRetry: () => void
   onChooseOption: (option: string) => void
+  onApprove: (record: ActionRecord) => void
+  onCancelAction: (record: ActionRecord) => void
 }
 
 export function VoiceSurface(props: VoiceSurfaceProps) {
@@ -45,12 +48,16 @@ export function VoiceSurface(props: VoiceSurfaceProps) {
     busy,
     connection,
     connectionError,
+    busyActions,
+    actionErrors,
     onSubmit,
     onToggleSpeech,
     onInterrupt,
     onCancel,
     onRetry,
     onChooseOption,
+    onApprove,
+    onCancelAction,
   } = props
 
   const scrollRef = useRef<HTMLDivElement | null>(null)
@@ -74,12 +81,12 @@ export function VoiceSurface(props: VoiceSurfaceProps) {
   }, [phase, speaking, voice.status])
 
   const statusLine = useMemo(() => {
-    if (connection === 'disconnected') return 'The backend is not reachable.'
-    if (voice.status === 'listening') return 'Listening.'
+    if (connection === 'disconnected') return 'I cannot reach the backend right now.'
+    if (voice.status === 'listening') return 'I am listening.'
     if (phase === 'thinking') return 'Working out what you meant.'
-    if (phase === 'executing') return 'Working on it.'
-    if (phase === 'awaiting_confirmation') return 'Waiting for you to confirm.'
-    if (speaking) return 'Speaking.'
+    if (phase === 'executing') return 'On it.'
+    if (phase === 'awaiting_confirmation') return 'I need your OK before I continue.'
+    if (speaking) return 'Here is what I found.'
     if (phase === 'error') return 'That did not work.'
     return 'Ask me anything, or say "Turn on Movie Buddy".'
   }, [connection, phase, speaking, voice.status])
@@ -88,7 +95,7 @@ export function VoiceSurface(props: VoiceSurfaceProps) {
     <div className="voice-surface">
       <div className="voice-surface__stage">
         <div className="voice-surface__orb">
-          <Companion state={companionState} size={196} />
+          <Companion state={companionState} size={264} />
           <p className="voice-surface__status" role="status">
             {statusLine}
           </p>
@@ -125,12 +132,30 @@ export function VoiceSurface(props: VoiceSurfaceProps) {
           </div>
         ) : null}
 
-        {previous ? <Exchange record={previous} onChooseOption={onChooseOption} /> : null}
-        {latest ? <Exchange record={latest} onChooseOption={onChooseOption} live /> : null}
+        {previous ? (
+          <Exchange
+            record={previous}
+            busyActions={busyActions}
+            actionErrors={actionErrors}
+            onChooseOption={onChooseOption}
+            onApprove={onApprove}
+            onCancelAction={onCancelAction}
+          />
+        ) : null}
+        {latest ? (
+          <Exchange
+            record={latest}
+            busyActions={busyActions}
+            actionErrors={actionErrors}
+            onChooseOption={onChooseOption}
+            onApprove={onApprove}
+            onCancelAction={onCancelAction}
+          />
+        ) : null}
 
         {busy && liveEvents.length > 0 ? (
           <div className="voice-surface__live" aria-live="polite">
-            {liveEvents.slice(-3).map((event, index) => (
+            {liveEvents.slice(-2).map((event, index) => (
               <p key={event.seq ?? index}>
                 <span className="voice-surface__live-dot" aria-hidden="true" />
                 {event.message ?? event.type ?? event.kind ?? 'update'}
@@ -142,30 +167,83 @@ export function VoiceSurface(props: VoiceSurfaceProps) {
 
       {connection === 'disconnected' ? (
         <div className="voice-surface__offline" role="alert">
-          <strong>The backend is not reachable.</strong> {connectionError ?? ''}
+          <AlertIcon size={15} />
+          <span>
+            <strong>I cannot reach the backend.</strong> {connectionError ?? ''}
+          </span>
           <button type="button" className="btn btn--sm" onClick={onRetry}>
-            Retry
+            Try again
           </button>
         </div>
       ) : null}
 
       <div className="voice-surface__composer">
-        <Composer
-          voice={voice}
-          busy={busy}
-          speaking={speaking}
-          speechNotice={speechNotice}
-          speechEnabled={speechEnabled}
-          onToggleSpeech={onToggleSpeech}
-          onSubmit={onSubmit}
-          onInterrupt={onInterrupt}
-        />
-        {busy ? (
-          <button type="button" className="btn btn--sm btn--ghost" onClick={onCancel}>
-            <StopIcon size={13} />
-            Stop
+        <div className="voice-surface__mic">
+          <button
+            type="button"
+            className="mic-button"
+            data-mode={
+              speaking ? 'speaking' : voice.status === 'listening' ? 'listening' : 'idle'
+            }
+            disabled={voice.status === 'unsupported' || busy}
+            aria-label={
+              speaking
+                ? 'Stop speaking'
+                : voice.status === 'listening'
+                  ? 'Stop listening'
+                  : voice.status === 'unsupported'
+                    ? 'Voice input is not available in this browser'
+                    : 'Start voice input'
+            }
+            title={
+              speaking
+                ? 'Stop speaking'
+                : voice.status === 'listening'
+                  ? 'Stop listening'
+                  : 'Start voice input'
+            }
+            onClick={() => {
+              if (speaking) {
+                onInterrupt()
+                return
+              }
+              if (voice.status === 'listening') voice.stop()
+              else voice.start()
+            }}
+          >
+            <span className="mic-button__pulse" aria-hidden="true" />
+            <MicIcon size={24} />
           </button>
-        ) : null}
+          <span className="voice-surface__mic-label">
+            {voice.status === 'unsupported'
+              ? 'Voice input is not available here'
+              : speaking
+                ? 'Speaking - press to stop'
+                : voice.status === 'listening'
+                  ? 'Listening - press to stop'
+                  : 'Tap to speak'}
+          </span>
+        </div>
+
+        <div className="voice-surface__input">
+          <Composer
+            voice={voice}
+            busy={busy}
+            speaking={speaking}
+            speechNotice={speechNotice}
+            speechEnabled={speechEnabled}
+            showMic={false}
+            onToggleSpeech={onToggleSpeech}
+            onSubmit={onSubmit}
+            onInterrupt={onInterrupt}
+          />
+          {busy ? (
+            <button type="button" className="btn btn--sm btn--ghost" onClick={onCancel}>
+              <StopIcon size={13} />
+              Stop
+            </button>
+          ) : null}
+        </div>
       </div>
     </div>
   )
@@ -173,18 +251,30 @@ export function VoiceSurface(props: VoiceSurfaceProps) {
 
 function Exchange({
   record,
+  busyActions,
+  actionErrors,
   onChooseOption,
-  live,
+  onApprove,
+  onCancelAction,
 }: {
   record: RequestRecord
+  busyActions: string[]
+  actionErrors: Record<string, string>
   onChooseOption: (option: string) => void
-  live?: boolean
+  onApprove: (record: ActionRecord) => void
+  onCancelAction: (record: ActionRecord) => void
 }) {
   if (record.error) {
     return (
       <div className="exchange exchange--error">
-        <p className="exchange__said">{record.error.message}</p>
-        <p className="exchange__meta">error {record.error.code}</p>
+        <p className="exchange__said">
+          {record.error.code === 'network_unreachable'
+            ? 'I could not reach the backend, so nothing happened.'
+            : 'That did not work.'}
+        </p>
+        <p className="exchange__meta">
+          {record.error.retryable ? 'You can ask me again.' : 'Try asking for it a different way.'}
+        </p>
       </div>
     )
   }
@@ -193,15 +283,17 @@ function Exchange({
   if (!response) {
     return (
       <div className="exchange exchange--pending">
-        <p className="exchange__said">Working on it...</p>
+        <p className="exchange__said">Working on it…</p>
       </div>
     )
   }
 
-  const actions = response.action_plan
+  // Only the actions this request is responsible for. Actions the backend
+  // carried over from an earlier turn are deliberately not shown here.
+  const actions = record.actions
 
   return (
-    <div className={`exchange${live ? ' exchange--live' : ''}`}>
+    <div className="exchange">
       <p className="exchange__you">{record.utterance}</p>
 
       {response.clarification ? (
@@ -224,8 +316,15 @@ function Exchange({
 
       {actions.length > 0 ? (
         <div className="exchange__cards">
-          {actions.map((action: Action) => (
-            <ActionCard key={action.action_id} action={action} />
+          {actions.map((entry) => (
+            <ActionCard
+              key={entry.action.action_id}
+              record={entry}
+              busy={busyActions.includes(entry.action.action_id)}
+              error={actionErrors[entry.action.action_id]}
+              onApprove={onApprove}
+              onCancel={onCancelAction}
+            />
           ))}
         </div>
       ) : null}
@@ -234,5 +333,3 @@ function Exchange({
     </div>
   )
 }
-
-export { MicIcon }

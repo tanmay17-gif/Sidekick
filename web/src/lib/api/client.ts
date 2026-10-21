@@ -2,6 +2,7 @@ import { API_BASE, ENDPOINTS } from './endpoints'
 import { SidekickApiError } from './errors'
 import {
   SESSION_HEADER,
+  type ActionEnvelope,
   type CapabilitiesResponse,
   type ProgressEvent,
   type SidekickRequest,
@@ -165,34 +166,64 @@ export class SidekickClient {
    * Approve or refuse a pending action.
    *
    * The confirmation binds to the exact action: the `plan_hash` that came with
-   * it is sent back, and the API rejects the approval with `409 conflict` if
+   * it is sent back, and the API rejects the approval with `409 conflict` when
    * the plan changed in the meantime.
+   *
+   * The body carries `session_id` because that is where the backend looks the
+   * action up - the header is not consulted by these endpoints.
    */
   async approveAction(
     actionId: string,
+    sessionId: string,
     planHash: string | null,
     approved: boolean,
     signal?: AbortSignal,
-  ): Promise<SidekickResponse> {
-    const body: Record<string, unknown> = { approved }
+  ): Promise<ActionEnvelope> {
+    const body: Record<string, unknown> = { session_id: sessionId, approved }
     if (planHash) body.plan_hash = planHash
     const response = await this.request(ENDPOINTS.approve(actionId), {
       method: 'POST',
       body: JSON.stringify(body),
       signal,
     })
-    const payload = (await response.json()) as SidekickResponse
-    return payload
+    return this.readActionEnvelope(response)
   }
 
   /** Cancel a pending or running action. */
-  async cancelAction(actionId: string, signal?: AbortSignal): Promise<SidekickResponse> {
+  async cancelAction(
+    actionId: string,
+    sessionId: string,
+    signal?: AbortSignal,
+  ): Promise<ActionEnvelope> {
     const response = await this.request(ENDPOINTS.cancel(actionId), {
       method: 'POST',
-      body: JSON.stringify({}),
+      body: JSON.stringify({ session_id: sessionId }),
       signal,
     })
-    return (await response.json()) as SidekickResponse
+    return this.readActionEnvelope(response)
+  }
+
+  /** Re-read one action and its events - used to refresh after a change. */
+  async actionState(
+    actionId: string,
+    sessionId: string,
+    signal?: AbortSignal,
+  ): Promise<ActionEnvelope> {
+    const path = `${ENDPOINTS.action(actionId)}?session_id=${encodeURIComponent(sessionId)}`
+    const response = await this.request(path, { method: 'GET', signal })
+    return this.readActionEnvelope(response)
+  }
+
+  private async readActionEnvelope(response: Response): Promise<ActionEnvelope> {
+    const payload = (await response.json()) as Partial<ActionEnvelope>
+    if (!payload || typeof payload !== 'object' || !payload.action) {
+      throw new SidekickApiError({
+        code: 'contract_violation',
+        message: 'The action endpoint did not return an action.',
+        status: response.status,
+      })
+    }
+    return { action: payload.action, events: payload.events ?? [] }
   }
 
   /** GET /capabilities - the honest live/simulated/unavailable inventory. */

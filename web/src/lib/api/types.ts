@@ -198,6 +198,17 @@ export interface SidekickResponse {
   speech?: string | null
 }
 
+/**
+ * The envelope the action endpoints return: one action plus its events.
+ * `POST /api/v1/actions/{id}/approve`, `POST .../cancel` and
+ * `GET /api/v1/actions/{id}` all answer with this shape - not with a
+ * `SidekickResponse`.
+ */
+export interface ActionEnvelope {
+  action: Action
+  events?: ProgressEvent[]
+}
+
 /* ------------------------------------------------------------------ *
  * Capabilities
  * Agent 1 owns the canonical schema; this is the shape the UI consumes.
