@@ -1349,13 +1349,27 @@
   white-space: pre;
 }
 
+.exec__raw {
+  margin: 0;
+  padding: var(--space-3);
+  border-radius: var(--radius-sm);
+  background: var(--surface-sunk);
+  border: 1px solid var(--line);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--ink-secondary);
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 220px;
+  overflow: auto;
+}
+
 .exec__diff {
   border: 1px solid var(--line);
   border-radius: var(--radius-sm);
   overflow: hidden;
   background: var(--surface);
 }
-
 .exec__diff-head {
   display: flex;
   align-items: center;

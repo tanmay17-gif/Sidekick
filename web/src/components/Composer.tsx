@@ -58,7 +58,7 @@ export function Composer({
         : 'Start voice input'
 
   return (
-    <div>
+    <div className="composer-block">
       <form
         className="composer"
         data-listening={voice.status === 'listening'}
