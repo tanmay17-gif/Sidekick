@@ -1,4 +1,5 @@
 import type { GameDescriptor, SidekickResponse } from '@/lib/api/types'
+import { LOCAL_ACTIVITIES } from '@/lib/games/registry'
 import { ChessBoard } from './ChessBoard'
 import { GameIcon } from './icons'
 import { EmptyState, Notice, Panel, StateBadge } from './ui'
@@ -19,12 +20,13 @@ interface ChessState {
 
 export function GamesPanel({ games, lastResponse, onRequest }: GamesPanelProps) {
   const chess = extractChessState(lastResponse)
+  const hasLocalActivities = LOCAL_ACTIVITIES.length > 0
 
-  if (games.length === 0) {
+  if (games.length === 0 && !hasLocalActivities) {
     return (
       <EmptyState
         title="No games are available"
-        body="The backend did not report any playable game. Nothing is listed because no move could actually be made."
+        body="The backend did not report any playable game and no local activity is bundled. Nothing is listed because no move could actually be made."
         glyph={<GameIcon size={32} />}
       />
     )
@@ -32,19 +34,30 @@ export function GamesPanel({ games, lastResponse, onRequest }: GamesPanelProps) 
 
   return (
     <div className="stack">
-      <Panel title="Available games" hint="Only games the backend actually implements are listed" flush>
-        <div className="list">
-          {games.map((game) => (
-            <div className="list__row" key={game.id}>
-              <div className="list__main">
-                <div className="list__title">{game.name}</div>
-                {game.detail ? <div className="list__sub">{game.detail}</div> : null}
+      {games.length > 0 ? (
+        <Panel
+          title="Backend games"
+          hint="Reported by the backend - the browser only renders what the service sends"
+          flush
+        >
+          <div className="list">
+            {games.map((game) => (
+              <div className="list__row" key={game.id}>
+                <div className="list__main">
+                  <div className="list__title">{game.name}</div>
+                  {game.detail ? <div className="list__sub">{game.detail}</div> : null}
+                </div>
+                <StateBadge state={game.state} detail={game.detail} />
               </div>
-              <StateBadge state={game.state} detail={game.detail} />
-            </div>
-          ))}
-        </div>
-      </Panel>
+            ))}
+          </div>
+        </Panel>
+      ) : (
+        <Notice tone="warn">
+          The backend did not report any games. The activities below run locally in this browser
+          and need no service.
+        </Notice>
+      )}
 
       {games.some((game) => game.state !== 'live') ? (
         <Notice tone="warn">
@@ -90,6 +103,31 @@ export function GamesPanel({ games, lastResponse, onRequest }: GamesPanelProps) 
                 position it reports.
               </p>
             </div>
+          </div>
+        </Panel>
+      ) : null}
+
+      {hasLocalActivities ? (
+        <Panel
+          title="Local activities"
+          hint="Shipped with the client - the rules, the opponent and the state are real and need no backend"
+        >
+          <div className="stack">
+            {LOCAL_ACTIVITIES.map((activity) => {
+              const Activity = activity.Component
+              return (
+                <details className="activity" key={activity.id}>
+                  <summary className="activity__summary">
+                    <span className="activity__name">{activity.name}</span>
+                    <span className="badge badge--quiet">local</span>
+                    <span className="activity__hint">{activity.summary}</span>
+                  </summary>
+                  <div className="activity__body">
+                    <Activity />
+                  </div>
+                </details>
+              )
+            })}
           </div>
         </Panel>
       ) : null}

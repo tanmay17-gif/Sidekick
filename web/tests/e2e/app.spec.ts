@@ -143,6 +143,37 @@ test('shows the games the backend reports and renders the reported board', async
   await expect(page.locator('.list__row').first().getByText('simulated')).toBeVisible()
 })
 
+test('plays a local game with a real opponent', async ({ page }) => {
+  await page.getByRole('button', { name: 'Games' }).click()
+
+  const activities = page.getByText('Local activities')
+  await expect(activities).toBeVisible()
+
+  // Tic-tac-toe is labelled as a local activity, not a backend service.
+  await expect(page.locator('.activity__name', { hasText: 'Tic-Tac-Toe' })).toBeVisible()
+  await expect(page.locator('.activity').first().locator('.badge', { hasText: 'local' })).toBeVisible()
+
+  await page.locator('.activity__summary').first().click()
+  const cell = page.locator('.ttt__cell').nth(4)
+  await cell.click()
+
+  // The minimax opponent answers with a real O.
+  await expect(page.locator('.ttt__cell[data-player="O"]')).toHaveCount(1)
+  await expect(page.getByText('your move', { exact: true })).toBeVisible()
+})
+
+test('plays 2048 locally with the real merge rules', async ({ page }) => {
+  await page.getByRole('button', { name: 'Games' }).click()
+  await page.locator('.activity__summary').nth(1).click()
+
+  const before = await page.locator('.tiles__cell').allTextContents()
+  await page.getByRole('button', { name: 'left', exact: true }).click()
+  const after = await page.locator('.tiles__cell').allTextContents()
+
+  expect(after).not.toEqual(before)
+  await expect(page.getByText(/score \d+/)).toBeVisible()
+})
+
 test('isolates two concurrent sessions', async ({ browser }) => {
   const contextA = await browser.newContext()
   const contextB = await browser.newContext()

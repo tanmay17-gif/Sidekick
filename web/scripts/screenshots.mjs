@@ -34,6 +34,16 @@ await page.getByRole('button', { name: 'Games' }).click()
 await page.waitForTimeout(400)
 await page.screenshot({ path: `${outDir}/05-games.png` })
 
+// Expand the local activities so they are visible in the reference set.
+const summaries = page.locator('.activity__summary')
+const count = await summaries.count()
+for (let index = 0; index < count; index += 1) {
+  await summaries.nth(index).click()
+}
+await page.locator('.activity').first().scrollIntoViewIfNeeded()
+await page.waitForTimeout(400)
+await page.screenshot({ path: `${outDir}/05b-games-local.png` })
+
 await page.setViewportSize({ width: 430, height: 860 })
 await page.getByRole('button', { name: 'Talk' }).click()
 await page.waitForTimeout(400)
