@@ -94,6 +94,107 @@ export class SidekickClient {
     }
   }
 
+  /**
+   * Stream the events of one action.
+   *
+   * `afterSeq` resumes a stream that was interrupted, using the contract's
+   * `?after=<seq>` parameter. Every later event is delivered, with no
+   * duplicates and no gaps.
+   */
+  async actionEvents(
+    actionId: string,
+    afterSeq: number | null,
+    handlers: { onEvent?: (event: ProgressEvent) => void },
+    signal?: AbortSignal,
+  ): Promise<ProgressEvent[]> {
+    const path = ENDPOINTS.actionEvents(actionId, afterSeq)
+    const response = await this.request(path, { method: 'GET', signal })
+    const contentType = response.headers.get('content-type')
+
+    if (!isEventStream(contentType) || !response.body) {
+      throw new SidekickApiError({
+        code: 'contract_violation',
+        message: 'The action event endpoint did not return an event stream.',
+        status: response.status,
+      })
+    }
+
+    const reader = response.body.getReader()
+    const decoder = new TextDecoder()
+    const events: ProgressEvent[] = []
+    let buffer = ''
+
+    const flushFrame = (frame: string) => {
+      const trimmed = frame.trim()
+      if (!trimmed) return
+      const event = parseSseFrame(trimmed)
+      if (!event) return
+      events.push(event)
+      handlers.onEvent?.(event)
+    }
+
+    try {
+      for (;;) {
+        const { done, value } = await reader.read()
+        if (done) break
+        buffer += decoder.decode(value, { stream: true })
+        let boundary = buffer.indexOf('\n\n')
+        while (boundary !== -1) {
+          flushFrame(buffer.slice(0, boundary))
+          buffer = buffer.slice(boundary + 2)
+          boundary = buffer.indexOf('\n\n')
+        }
+      }
+      buffer += decoder.decode()
+      flushFrame(buffer)
+    } catch (cause) {
+      if (cause instanceof DOMException && cause.name === 'AbortError') {
+        throw new SidekickApiError({
+          code: 'timeout',
+          message: 'The event stream was aborted.',
+          timeout: true,
+        })
+      }
+      throw cause
+    }
+
+    return events
+  }
+
+  /**
+   * Approve or refuse a pending action.
+   *
+   * The confirmation binds to the exact action: the `plan_hash` that came with
+   * it is sent back, and the API rejects the approval with `409 conflict` if
+   * the plan changed in the meantime.
+   */
+  async approveAction(
+    actionId: string,
+    planHash: string | null,
+    approved: boolean,
+    signal?: AbortSignal,
+  ): Promise<SidekickResponse> {
+    const body: Record<string, unknown> = { approved }
+    if (planHash) body.plan_hash = planHash
+    const response = await this.request(ENDPOINTS.approve(actionId), {
+      method: 'POST',
+      body: JSON.stringify(body),
+      signal,
+    })
+    const payload = (await response.json()) as SidekickResponse
+    return payload
+  }
+
+  /** Cancel a pending or running action. */
+  async cancelAction(actionId: string, signal?: AbortSignal): Promise<SidekickResponse> {
+    const response = await this.request(ENDPOINTS.cancel(actionId), {
+      method: 'POST',
+      body: JSON.stringify({}),
+      signal,
+    })
+    return (await response.json()) as SidekickResponse
+  }
+
   /** GET /capabilities - the honest live/simulated/unavailable inventory. */
   async capabilities(signal?: AbortSignal): Promise<CapabilitiesResponse> {
     const response = await this.request(ENDPOINTS.capabilities, { method: 'GET', signal })

@@ -1,16 +1,24 @@
-import type { Capability, ProviderDescriptor, SidekickResponse } from '@/lib/api/types'
+import type { Capability, ProviderDescriptor, SidekickResponse, ToolDescriptor } from '@/lib/api/types'
 import { MusicIcon } from './icons'
 import { EmptyState, Notice, Panel, StateBadge } from './ui'
 
 export interface MusicPanelProps {
   providers: ProviderDescriptor[]
   capabilities: Capability[]
+  /** The execution service's own status vocabulary, rendered verbatim. */
+  tools: ToolDescriptor[]
   /** The most recent action plan, used to show what the backend actually did. */
   lastResponse: SidekickResponse | null
   onRequest: (utterance: string) => void
 }
 
-export function MusicPanel({ providers, capabilities, lastResponse, onRequest }: MusicPanelProps) {
+export function MusicPanel({
+  providers,
+  capabilities,
+  tools,
+  lastResponse,
+  onRequest,
+}: MusicPanelProps) {
   const musicCaps = capabilities.filter((capability) => capability.id.startsWith('music.'))
   const musicActions = (lastResponse?.action_plan ?? []).filter((action) =>
     action.tool.startsWith('music.'),
@@ -52,6 +60,19 @@ export function MusicPanel({ providers, capabilities, lastResponse, onRequest }:
                   {capability.detail ? <div className="list__sub">{capability.detail}</div> : null}
                 </div>
                 <StateBadge state={capability.state} detail={capability.detail} />
+              </div>
+            ))}
+          {tools
+            .filter((tool) => tool.tool.startsWith('music.'))
+            .map((tool) => (
+              <div className="list__row" key={tool.tool}>
+                <div className="list__main">
+                  <div className="list__title">{tool.tool}</div>
+                  {tool.status_detail ? (
+                    <div className="list__sub">{tool.status_detail}</div>
+                  ) : null}
+                </div>
+                <span className="badge badge--quiet">{tool.status}</span>
               </div>
             ))}
         </div>

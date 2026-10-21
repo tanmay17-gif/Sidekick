@@ -1,58 +1,71 @@
 /* ------------------------------------------------------------------
-   Sidekick design tokens
-   One restrained system: near-black canvas, a single cool accent,
-   semantic status hues reserved for state only.
+   Sidekick design tokens - light, warm, editorial.
+
+   One warm ivory canvas, ink-dark type, a single lavender-indigo
+   accent and a restrained coral highlight. Semantic colours are
+   reserved for state only, never decoration.
    ------------------------------------------------------------------ */
 
 :root {
-  color-scheme: dark;
+  color-scheme: light;
 
   /* Canvas + surfaces ------------------------------------------- */
-  --canvas: #0a0c0f;
-  --surface-1: #101419;
-  --surface-2: #161b22;
-  --surface-3: #1d232c;
-  --surface-raised: #212832;
+  --canvas: #faf7f2;
+  --canvas-deep: #f3eee5;
+  --surface: #ffffff;
+  --surface-2: #f8f4ed;
+  --surface-3: #efe8dc;
+  --surface-sunk: #ece5d8;
 
   /* Lines ------------------------------------------------------- */
-  --line-subtle: #1c222b;
-  --line: #262d38;
-  --line-strong: #333c4a;
+  --line: #e7dfd2;
+  --line-subtle: #efe9df;
+  --line-strong: #d5c9b7;
 
   /* Ink --------------------------------------------------------- */
-  --ink: #e9edf3;
-  --ink-secondary: #b3bdc9;
-  --ink-muted: #8b95a4;
-  --ink-faint: #798494;
+  --ink: #1c1917;
+  --ink-secondary: #57504a;
+  --ink-muted: #6e655b;
+  --ink-faint: #776e63;
 
-  /* Accent (single hue, used for focus + primary action) -------- */
-  --accent: #63d2c4;
-  --accent-strong: #8ae6da;
-  --accent-dim: #2c6f68;
-  --accent-ink: #04211f;
-  --accent-wash: rgba(99, 210, 196, 0.12);
-  --accent-wash-strong: rgba(99, 210, 196, 0.2);
+  /* Accent - one lavender-indigo, used for focus and primary action */
+  --accent: #5b57c9;
+  --accent-strong: #4743ae;
+  --accent-deep: #38348c;
+  --accent-soft: #ecebfa;
+  --accent-wash: rgba(91, 87, 201, 0.09);
+  --accent-wash-strong: rgba(91, 87, 201, 0.16);
+  --accent-ink: #ffffff;
+
+  /* Highlight - a restrained peach/coral for moments that matter */
+  --coral: #de6a4f;
+  --coral-ink: #b4432a;
+  --coral-soft: #fceae3;
 
   /* Semantic state ---------------------------------------------- */
-  --state-idle: #7d8794;
-  --state-listening: #63d2c4;
-  --state-thinking: #7fa8e0;
-  --state-executing: #d8b46a;
-  --state-confirm: #e0a15f;
-  --state-success: #6bc48a;
-  --state-danger: #e4756c;
-  --state-disconnected: #6f7a8a;
+  --state-idle: #837a70;
+  --state-listening: #5b57c9;
+  --state-thinking: #3f6fb5;
+  --state-executing: #96650a;
+  --state-confirm: #a8641c;
+  --state-speaking: #b4432a;
+  --state-success: #1f7a4d;
+  --state-danger: #b93a2e;
+  --state-disconnected: #837a70;
 
-  --success-wash: rgba(107, 196, 138, 0.12);
-  --danger-wash: rgba(228, 117, 108, 0.12);
-  --warn-wash: rgba(224, 161, 95, 0.12);
-  --info-wash: rgba(127, 168, 224, 0.12);
+  --success-soft: #e6f3ec;
+  --danger-soft: #fbeae7;
+  --warn-soft: #fbf1de;
+  --info-soft: #e9f0f9;
+  --coral-wash: rgba(222, 106, 79, 0.1);
 
   /* Type -------------------------------------------------------- */
   --font-sans: 'Inter var', 'Inter', ui-sans-serif, system-ui, -apple-system, 'Segoe UI',
     Roboto, 'Helvetica Neue', Arial, sans-serif;
   --font-mono: ui-monospace, 'SF Mono', 'Cascadia Mono', 'Roboto Mono', Menlo, Consolas,
     'Liberation Mono', monospace;
+  --font-display: 'Iowan Old Style', 'Palatino Linotype', Palatino, 'Book Antiqua', Georgia,
+    serif;
 
   --text-2xs: 0.6875rem; /* 11px - labels */
   --text-xs: 0.75rem; /* 12px - meta */
@@ -61,16 +74,16 @@
   --text-lg: 1.0625rem; /* 17px - lead */
   --text-xl: 1.375rem; /* 22px - section title */
   --text-2xl: 1.75rem; /* 28px - page title */
-  --text-3xl: 2.25rem; /* 36px - display */
+  --text-3xl: 2.5rem; /* 40px - display */
 
-  --leading-tight: 1.2;
+  --leading-tight: 1.16;
   --leading-snug: 1.35;
-  --leading-normal: 1.55;
+  --leading-normal: 1.58;
 
-  --tracking-tight: -0.014em;
+  --tracking-tight: -0.018em;
   --tracking-normal: 0;
   --tracking-wide: 0.06em;
-  --tracking-wider: 0.12em;
+  --tracking-wider: 0.13em;
 
   /* Space (4px base) -------------------------------------------- */
   --space-0: 0;
@@ -87,30 +100,31 @@
   --space-16: 4rem;
 
   /* Radii ------------------------------------------------------- */
-  --radius-xs: 4px;
-  --radius-sm: 6px;
-  --radius-md: 10px;
-  --radius-lg: 14px;
-  --radius-xl: 20px;
+  --radius-xs: 5px;
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 18px;
+  --radius-xl: 26px;
   --radius-pill: 999px;
 
-  /* Elevation (restrained) -------------------------------------- */
-  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
-  --shadow-md: 0 6px 20px -8px rgba(0, 0, 0, 0.65);
-  --shadow-lg: 0 18px 48px -18px rgba(0, 0, 0, 0.8);
-  --ring: 0 0 0 2px var(--canvas), 0 0 0 4px var(--accent-dim);
+  /* Elevation - soft, warm, never harsh ------------------------- */
+  --shadow-sm: 0 1px 2px rgba(63, 52, 36, 0.06);
+  --shadow-md: 0 6px 18px -8px rgba(63, 52, 36, 0.18);
+  --shadow-lg: 0 20px 46px -22px rgba(63, 52, 36, 0.28);
+  --ring: 0 0 0 2px var(--surface), 0 0 0 4px var(--accent-soft);
 
   /* Motion ------------------------------------------------------ */
   --ease-out: cubic-bezier(0.22, 0.61, 0.36, 1);
+  --ease-spring: cubic-bezier(0.34, 1.4, 0.64, 1);
   --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
-  --duration-fast: 120ms;
-  --duration-base: 200ms;
-  --duration-slow: 320ms;
+  --duration-fast: 130ms;
+  --duration-base: 220ms;
+  --duration-slow: 360ms;
 
   /* Layout ------------------------------------------------------ */
-  --rail-width: 248px;
-  --dock-max: 880px;
-  --content-max: 1180px;
+  --rail-width: 252px;
+  --dock-max: 900px;
+  --content-max: 1220px;
 }
 
 @media (prefers-reduced-motion: reduce) {

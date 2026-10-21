@@ -2,15 +2,59 @@ import type { CompanionRule, MediaAsset, MediaCue } from '@/lib/api/types'
 import { parseSubtitles } from './subtitles'
 
 /**
- * The movie companion ships with one openly licensed film whose official
- * English subtitle track is included in the repository, so cue timings are
- * real and verifiable rather than invented.
+ * The media the movie companion can play.
  *
- * Tears of Steel (2012) - Blender Foundation / MPEG, CC BY 3.0.
- * Video: Internet Archive derivative `tears_of_steel_720p.mp4` (faststart H.264).
- * Subtitles: official `TOS-en.srt` from download.blender.org.
+ * Both films are openly licensed and both ship their caption track with the
+ * app, so the companion has real, verifiable cue timings.
+ *
+ * `letter-v`
+ *   "Letter V" - Internet Archive item `LetterV`.
+ *   The copy is released under CC0 1.0 (a public domain dedication) by its
+ *   creator; the item metadata records the creator as "Langerman
+ *   www.fewdoit.com" and describes it as a "balloon twisting de vA-deo
+ *   instruction ... public domain dedication".
+ *   Runtime 2:29, with a hand-authored English caption track that covers the
+ *   whole film. Bundled in the app (15.6 MB) so the demo never depends on a
+ *   third-party host being up.
+ *
+ * `tears-of-steel`
+ *   "Tears of Steel" (2012), Blender Foundation / MPEG, CC BY 3.0.
+ *   Streamed from the Internet Archive derivative (faststart H.264, HTTP
+ *   range support). The official English subtitle file is bundled.
+ *
+ * See docs/MOVIE_SOURCES.md for the full rights evidence and the limitations.
  */
+
 export const DEFAULT_MEDIA: MediaAsset = {
+  id: 'letter-v',
+  title: 'Letter V',
+  credit: 'Letter V - public domain dedication (CC0 1.0), Internet Archive item LetterV',
+  license: 'CC0 1.0',
+  src: `${import.meta.env.BASE_URL}media/letter-v/letter-v.mp4`,
+  mime_type: 'video/mp4',
+  // The WebM (VP9 + Opus) is the same film, transcoded for browsers without
+  // H.264 - notably the Chromium build that ships with Playwright. The browser
+  // picks whichever it can decode.
+  sources: [
+    {
+      src: `${import.meta.env.BASE_URL}media/letter-v/letter-v.mp4`,
+      mime_type: 'video/mp4',
+      label: 'MP4 (H.264)',
+    },
+    {
+      src: `${import.meta.env.BASE_URL}media/letter-v/letter-v.webm`,
+      mime_type: 'video/webm',
+      label: 'WebM (VP9)',
+    },
+  ],
+  subtitle_src: `${import.meta.env.BASE_URL}media/letter-v/letter-v.srt`,
+  subtitle_label: 'hand-authored English captions',
+  cues: [],
+  companion_rules: [],
+  bundled: true,
+}
+
+export const ALTERNATE_MEDIA: MediaAsset = {
   id: 'tears-of-steel',
   title: 'Tears of Steel',
   credit: 'Tears of Steel - Blender Foundation / MPEG (CC BY 3.0)',
@@ -20,33 +64,11 @@ export const DEFAULT_MEDIA: MediaAsset = {
   subtitle_src: `${import.meta.env.BASE_URL}media/tears-of-steel/TOS-en.srt`,
   subtitle_label: 'official English subtitles',
   cues: [],
-  companion_rules: [
-    {
-      pattern: '\\brobot\\b',
-      title: 'Robotics mentioned',
-      reason:
-        'A character talks about a robotic hand. Fired on the real timestamp of that subtitle line.',
-    },
-    {
-      pattern: '\\bspace\\b',
-      title: 'Space ambition',
-      reason:
-        'Dialogue about going to space. Fired on the real timestamp of that subtitle line.',
-    },
-    {
-      pattern: '\\bmemory\\b|\\boverwrite\\b',
-      title: 'Memory theme',
-      reason:
-        'The film returns to memory and identity. Fired on the real timestamp of that subtitle line.',
-    },
-    {
-      pattern: '\\blesson\\b',
-      title: 'Closing reflection',
-      reason:
-        'A reflective closing line. Fired on the real timestamp of that subtitle line.',
-    },
-  ],
+  companion_rules: [],
+  bundled: false,
 }
+
+export const MEDIA_LIBRARY: MediaAsset[] = [DEFAULT_MEDIA, ALTERNATE_MEDIA]
 
 export interface LoadCatalogResult {
   asset: MediaAsset
@@ -74,7 +96,7 @@ interface BackendCatalogResponse {
 
 /**
  * Load the catalog, preferring a backend-provided one and falling back to the
- * film shipped in the repository.
+ * films shipped in the repository.
  *
  * The backend entry is only used when its media and subtitle actually load -
  * a half-working catalog entry must not replace a working local one.
@@ -100,19 +122,19 @@ export async function loadMediaCatalog(
             return { asset: result.asset, warnings, source: 'backend' }
           }
           warnings.push(
-            'The backend catalog entry had no readable subtitle track, so the bundled film was used instead.',
+            'The backend catalog entry had no readable subtitle track, so a bundled film was used instead.',
           )
         }
       } else if (response.status !== 404) {
         // 404 simply means the backend does not offer a catalog - that is a
         // supported configuration, not a problem worth shouting about.
         warnings.push(
-          `Backend media catalog returned HTTP ${response.status}. Using the bundled film.`,
+          `Backend media catalog returned HTTP ${response.status}. Using a bundled film.`,
         )
       }
     } catch (cause) {
       warnings.push(
-        `Backend media catalog unavailable (${cause instanceof Error ? cause.message : 'unknown error'}); using the bundled film.`,
+        `Backend media catalog unavailable (${cause instanceof Error ? cause.message : 'unknown error'}); using a bundled film.`,
       )
     }
   }
@@ -121,7 +143,23 @@ export async function loadMediaCatalog(
   return { asset: result.asset, warnings, source: 'bundled' }
 }
 
-/** Load the subtitle track for an asset and parse it into real cues. */
+/**
+ * Load every bundled film with its caption track parsed.
+ * A subtitle failure is reported, never silently ignored.
+ */
+export async function loadMediaLibrary(
+  fetchImpl: typeof fetch = globalThis.fetch.bind(globalThis),
+): Promise<{ assets: MediaAsset[]; warnings: string[] }> {
+  const warnings: string[] = []
+  const assets: MediaAsset[] = []
+  for (const asset of MEDIA_LIBRARY) {
+    const result = await hydrate(asset, fetchImpl, warnings)
+    assets.push(result.asset)
+  }
+  return { assets, warnings }
+}
+
+/** Load the subtitle track for one asset and parse it into real cues. */
 async function hydrate(
   asset: MediaAsset,
   fetchImpl: typeof fetch,
@@ -133,34 +171,23 @@ async function hydrate(
     const response = await fetchImpl(asset.subtitle_src)
     if (!response.ok) {
       warnings.push(
-        `Subtitle track could not be loaded (HTTP ${response.status}). Companion events are disabled.`,
+        `Captions for "${asset.title}" could not be loaded (HTTP ${response.status}). Companion events are disabled for it.`,
       )
     } else {
       const parsed = parseSubtitles(await response.text())
       if (parsed.length === 0) {
-        warnings.push('Subtitle track contained no readable cues. Companion events are disabled.')
+        warnings.push(
+          `The caption track for "${asset.title}" contained no readable cues. Companion events are disabled for it.`,
+        )
       } else {
         cues = parsed
       }
     }
   } catch (cause) {
     warnings.push(
-      `Subtitle track could not be read: ${cause instanceof Error ? cause.message : 'unknown error'}.`,
+      `Captions for "${asset.title}" could not be read: ${cause instanceof Error ? cause.message : 'unknown error'}.`,
     )
   }
 
   return { asset: { ...asset, cues }, cues }
-}
-
-/**
- * Load the shipped media descriptor and its subtitle cues.
- * A subtitle failure is reported, never silently ignored - without cues the
- * companion cannot claim to understand anything.
- */
-export async function loadDefaultMedia(
-  fetchImpl: typeof fetch = globalThis.fetch.bind(globalThis),
-): Promise<LoadCatalogResult> {
-  const warnings: string[] = []
-  const result = await hydrate(DEFAULT_MEDIA, fetchImpl, warnings)
-  return { asset: result.asset, warnings, source: 'bundled' }
 }

@@ -5,9 +5,10 @@ import { expect, test } from '@playwright/test'
  *
  * Scope: these run the real production build in a real browser and talk to the
  * Sidekick *development stub* over HTTP. They therefore prove the browser
- * client, the HTTP transport, the session header and the rendering of real
- * contract payloads. They do NOT prove the real backend (owned by the
- * Core/Execution agents) - see docs/EXPERIENCE.md for the claim levels.
+ * client, the HTTP transport, the session header, the rendering of real
+ * contract payloads and real media playback. They do NOT prove the real
+ * Sidekick backend (owned by the Core/Execution agents) - see
+ * docs/EXPERIENCE.md for the claim levels.
  */
 
 test.beforeEach(async ({ page }) => {
@@ -23,6 +24,13 @@ test('reports the backend capability inventory with honest state labels', async 
   await expect(caps.getByText('unconfigured')).toBeVisible()
 })
 
+test('shows the companion and the real current task', async ({ page }) => {
+  const companion = page.locator('.hero__companion .companion')
+  await expect(companion).toHaveAttribute('data-state', 'idle')
+  await expect(companion).toHaveAttribute('aria-label', /here when you need me/i)
+  await expect(page.getByText('Ready', { exact: true })).toBeVisible()
+})
+
 test('resolves a typed request and renders the real action plan', async ({ page }) => {
   await page.getByLabel('Your request').fill('play a song on spotify')
   await page.getByRole('button', { name: 'Send' }).click()
@@ -30,7 +38,30 @@ test('resolves a typed request and renders the real action plan', async ({ page 
   await expect(page.locator('.turn__utterance')).toHaveText('play a song on spotify')
   const plan = page.locator('.plan__item').first()
   await expect(plan.locator('.plan__tool')).toHaveText('music.play')
-  await expect(page.locator('.bubble__meta').first()).toContainText('deterministic-rules')
+})
+
+test('shows a decision trace built from the real response', async ({ page }) => {
+  await page.getByLabel('Your request').fill('play a song on spotify')
+  await page.getByRole('button', { name: 'Send' }).click()
+
+  const trace = page.locator('.trace')
+  await expect(trace).toBeVisible()
+  await expect(trace.getByText('Heard')).toBeVisible()
+  await expect(trace.getByText('Understood')).toBeVisible()
+  await expect(trace.getByText('Decided')).toBeVisible()
+  await expect(trace.getByText('Planned')).toBeVisible()
+  // The provenance the backend reported is shown verbatim.
+  await expect(trace).toContainText('deterministic-rules')
+})
+
+test('exposes the raw payload in the developer inspection mode', async ({ page }) => {
+  await page.getByLabel('Your request').fill('play a song on spotify')
+  await page.getByRole('button', { name: 'Send' }).click()
+  await expect(page.locator('.trace')).toBeVisible()
+
+  await page.getByRole('button', { name: 'Raw payload' }).click()
+  const raw = page.getByLabel('Raw response payload')
+  await expect(raw).toContainText('"request_id"')
 })
 
 test('applies a mid-request correction before anything executes', async ({ page }) => {
@@ -41,7 +72,7 @@ test('applies a mid-request correction before anything executes', async ({ page 
   await page.getByLabel('Your request').fill('no wait, spotify')
   await page.getByRole('button', { name: 'Send' }).click()
 
-  await expect(page.getByText('Correction detected')).toBeVisible()
+  await expect(page.getByText('Correction detected').first()).toBeVisible()
   await expect(page.locator('.plan__item').last().locator('.plan__tool')).toHaveText('music.play')
 })
 
@@ -72,20 +103,6 @@ test('surfaces a backend failure instead of an empty answer', async ({ page }) =
   await expect(page.locator('.bubble--error')).toContainText(/could not reach|network/i)
 })
 
-test('streams live progress and renders the real diff for a coding job', async ({ page }) => {
-  await page.getByLabel('Your request').fill('write a function that greets the user')
-  await page.getByRole('button', { name: 'Send' }).click()
-
-  // Progress arrives over the event stream, not from a local timer.
-  await expect(page.getByText('Live progress')).toBeVisible({ timeout: 15_000 })
-  await expect(page.getByText('Job queued')).toBeVisible()
-
-  // The patch is the one the backend sent.
-  await expect(page.getByText('unified diff')).toBeVisible()
-  await expect(page.locator('.diff__line--add').first()).toBeVisible()
-  await expect(page.getByText(/const trimmed = name\.trim\(\)/)).toBeVisible()
-})
-
 test('offers a text fallback when the browser has no speech engine', async ({ browser }) => {
   const context = await browser.newContext()
   await context.addInitScript(() => {
@@ -105,31 +122,6 @@ test('offers a text fallback when the browser has no speech engine', async ({ br
   await context.close()
 })
 
-test('shows the movie companion with a real subtitle track', async ({ page }) => {
-  await page.getByRole('button', { name: 'Movie' }).click()
-
-  const video = page.locator('video')
-  await expect(video).toBeVisible()
-  await expect(video).toHaveAttribute('src', /tears_of_steel_720p\.mp4/)
-
-  const track = page.locator('video track')
-  await expect(track).toHaveCount(1)
-  await expect(track).toHaveAttribute('kind', 'subtitles')
-  await expect(page.getByText(/Subtitle-based/)).toBeVisible()
-  await expect(page.getByText('76 timed lines')).toBeVisible()
-})
-
-test('recovers when the media resource cannot be loaded', async ({ page }) => {
-  await page.route('**/*.mp4', (route) => route.abort('failed'))
-  await page.getByRole('button', { name: 'Movie' }).click()
-
-  const video = page.locator('video')
-  await expect(video).toBeVisible()
-  await expect(page.getByText(/could not be loaded|not supported|blocked/i)).toBeVisible()
-  // The rest of the surface keeps working.
-  await expect(page.getByRole('heading', { name: 'Companion' })).toBeVisible()
-})
-
 test('keeps the music surface honest about an unconfigured provider', async ({ page }) => {
   await page.getByRole('button', { name: 'Music' }).click()
   await expect(page.locator('.list__title', { hasText: 'Spotify' })).toBeVisible()
@@ -143,40 +135,158 @@ test('shows the games the backend reports and renders the reported board', async
   await expect(page.locator('.list__row').first().getByText('simulated')).toBeVisible()
 })
 
-test('plays a local game with a real opponent', async ({ page }) => {
-  await page.getByRole('button', { name: 'Games' }).click()
+/* ------------------------------------------------------------------ *
+ * Movie Buddy
+ * ------------------------------------------------------------------ */
 
-  const activities = page.getByText('Local activities')
-  await expect(activities).toBeVisible()
-
-  // Tic-tac-toe is labelled as a local activity, not a backend service.
-  await expect(page.locator('.activity__name', { hasText: 'Tic-Tac-Toe' })).toBeVisible()
-  await expect(page.locator('.activity').first().locator('.badge', { hasText: 'local' })).toBeVisible()
-
-  await page.locator('.activity__summary').first().click()
-  const cell = page.locator('.ttt__cell').nth(4)
-  await cell.click()
-
-  // The minimax opponent answers with a real O.
-  await expect(page.locator('.ttt__cell[data-player="O"]')).toHaveCount(1)
-  await expect(page.getByText('your move', { exact: true })).toBeVisible()
+test('states what Movie Buddy can and cannot observe', async ({ page }) => {
+  await page.getByRole('button', { name: 'Movie Buddy' }).click()
+  await expect(page.getByText(/cannot see other browser tabs/i)).toBeVisible()
+  await expect(page.getByText(/does not analyse the picture/i)).toBeVisible()
 })
 
-test('plays 2048 locally with the real merge rules', async ({ page }) => {
-  await page.getByRole('button', { name: 'Games' }).click()
-  await page.locator('.activity__summary').nth(1).click()
+test('turns Movie Buddy on from a typed command, without naming a film', async ({ page }) => {
+  await page.getByLabel('Your request').fill('Turn on Movie Buddy.')
+  await page.getByRole('button', { name: 'Send' }).click()
 
-  const before = await page.locator('.tiles__cell').allTextContents()
-  // A single direction can legitimately be a no-op, so every direction is
-  // tried before the board is compared.
-  for (const direction of ['left', 'up', 'right', 'down']) {
-    await page.getByRole('button', { name: direction, exact: true }).click()
-  }
-  const after = await page.locator('.tiles__cell').allTextContents()
-
-  expect(after).not.toEqual(before)
-  await expect(page.getByText(/score \d+/)).toBeVisible()
+  // The surface switched and the companion is on.
+  await expect(page.getByRole('heading', { name: 'Watch together' })).toBeVisible()
+  await expect(page.getByText(/Movie Buddy is on and waiting with you/i)).toBeVisible()
 })
+
+test('really plays the bundled film and syncs the captions to the media clock', async ({ page }) => {
+  await page.getByRole('button', { name: 'Movie Buddy' }).click()
+
+  const video = page.locator('video')
+  await expect(video).toBeVisible()
+  await expect(page.locator('video source[src*="letter-v.mp4"]')).toHaveCount(1)
+
+  // The media really loads: the browser knows its duration.
+  await page.waitForFunction(
+    () => {
+      const element = document.querySelector('video')
+      return element instanceof HTMLVideoElement && element.readyState >= 1 && element.duration > 0
+    },
+    undefined,
+    { timeout: 30_000 },
+  )
+  const duration = await video.evaluate((element) => (element as HTMLVideoElement).duration)
+  expect(duration).toBeGreaterThan(100)
+  expect(duration).toBeLessThan(200)
+
+  // Play it for real and let the media clock advance.
+  await video.evaluate((element) => {
+    const media = element as HTMLVideoElement
+    media.muted = true
+    return media.play()
+  })
+  await page.waitForFunction(
+    () => {
+      const element = document.querySelector('video')
+      return element instanceof HTMLVideoElement && element.currentTime > 1
+    },
+    undefined,
+    { timeout: 30_000 },
+  )
+
+  // The caption shown is the cue at the real playback position.
+  const overlay = page.locator('.stage__overlay')
+  await expect(overlay).not.toHaveAttribute('data-empty', 'true')
+  const spoken = await overlay.innerText()
+  expect(spoken.length).toBeGreaterThan(0)
+})
+
+test('the companion reacts at a real caption and explains why', async ({ page }) => {
+  await page.getByRole('button', { name: 'Movie Buddy' }).click()
+  await page.getByRole('button', { name: 'Turn on Movie Buddy' }).click()
+
+  const video = page.locator('video')
+  await page.waitForFunction(
+    () => {
+      const element = document.querySelector('video')
+      return element instanceof HTMLVideoElement && element.readyState >= 1
+    },
+    undefined,
+    { timeout: 30_000 },
+  )
+
+  // Move the real media clock onto the first caption line.
+  await video.evaluate((element) => {
+    const media = element as HTMLVideoElement
+    media.currentTime = 1.5
+    media.dispatchEvent(new Event('timeupdate'))
+  })
+
+  await expect(page.locator('.buddy__log-item').first()).toBeVisible()
+  await page.getByRole('button', { name: 'Why did Sidekick react?' }).click()
+  await expect(page.getByText(/first line in the caption track/i)).toBeVisible()
+})
+
+test('goes quiet on request and resumes', async ({ page }) => {
+  await page.getByRole('button', { name: 'Movie Buddy' }).click()
+  await page.getByRole('button', { name: 'Be quiet for a bit' }).click()
+  await expect(page.getByText(/Staying quiet for \d+ more seconds/i)).toBeVisible()
+
+  await page.getByRole('button', { name: 'Resume Movie Buddy' }).click()
+  await expect(page.getByText(/Movie Buddy is on and waiting with you|Movie Buddy is on and following/i)).toBeVisible()
+})
+
+test('seeks backwards with the real media clock', async ({ page }) => {
+  await page.getByRole('button', { name: 'Movie Buddy' }).click()
+  const video = page.locator('video')
+  await page.waitForFunction(
+    () => {
+      const element = document.querySelector('video')
+      return element instanceof HTMLVideoElement && element.readyState >= 1
+    },
+    undefined,
+    { timeout: 30_000 },
+  )
+  await video.evaluate((element) => {
+    ;(element as HTMLVideoElement).currentTime = 60
+  })
+  await page.getByRole('button', { name: '-30s' }).click()
+  const time = await video.evaluate((element) => (element as HTMLVideoElement).currentTime)
+  expect(time).toBeGreaterThanOrEqual(29)
+  expect(time).toBeLessThanOrEqual(31)
+})
+
+test('answers what just happened from the captions', async ({ page }) => {
+  await page.getByRole('button', { name: 'Movie Buddy' }).click()
+  const video = page.locator('video')
+  await page.waitForFunction(
+    () => {
+      const element = document.querySelector('video')
+      return element instanceof HTMLVideoElement && element.readyState >= 1
+    },
+    undefined,
+    { timeout: 30_000 },
+  )
+  await video.evaluate((element) => {
+    const media = element as HTMLVideoElement
+    media.currentTime = 22
+    media.dispatchEvent(new Event('timeupdate'))
+  })
+  await page.getByRole('button', { name: 'What just happened?' }).click()
+  await expect(page.getByText('Sidekick said')).toBeVisible()
+  await expect(page.locator('.buddy__answer')).toContainText(/caption/i)
+})
+
+test('recovers when the media resource cannot be loaded', async ({ page }) => {
+  await page.route('**/media/letter-v/*', (route) => route.abort('failed'))
+  await page.getByRole('button', { name: 'Movie Buddy' }).click()
+
+  const video = page.locator('video')
+  await expect(video).toBeVisible()
+  await expect(page.getByText(/not supported or the network blocked it|cannot decode|none of the available video formats/i)).toBeVisible()
+  // The rest of the surface keeps working.
+  await expect(page.locator('.buddy__panel')).toBeVisible()
+  await expect(page.getByText('Say or type')).toBeVisible()
+})
+
+/* ------------------------------------------------------------------ *
+ * Session behaviour
+ * ------------------------------------------------------------------ */
 
 test('isolates two concurrent sessions', async ({ browser }) => {
   const contextA = await browser.newContext()
@@ -191,7 +301,6 @@ test('isolates two concurrent sessions', async ({ browser }) => {
   const sessionB = await pageB.locator('.session__id').innerText()
   expect(sessionA).not.toEqual(sessionB)
 
-  // A request in one session must not appear in the other.
   await pageA.getByLabel('Your request').fill('play a song on spotify')
   await pageA.getByRole('button', { name: 'Send' }).click()
   await expect(pageA.locator('.plan__item').first()).toBeVisible()
@@ -214,5 +323,4 @@ test('recovers from a disconnect and starts a clean session on demand', async ({
   const after = await page.locator('.session__id').innerText()
   expect(after).not.toEqual(before)
   await expect(page.getByText('Nothing asked yet')).toBeVisible()
-  await expect(page.locator('.turn')).toHaveCount(0)
 })

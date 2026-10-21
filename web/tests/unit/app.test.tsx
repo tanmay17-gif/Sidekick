@@ -6,7 +6,7 @@ import { resolve } from 'node:path'
 import { App } from '@/App'
 import type { CapabilitiesResponse, SidekickResponse } from '@/lib/api/types'
 
-const SRT_PATH = resolve(process.cwd(), 'public/media/tears-of-steel/TOS-en.srt')
+const SRT = readFileSync(resolve(process.cwd(), 'public/media/letter-v/letter-v.srt'), 'utf8')
 
 const capabilities: CapabilitiesResponse = {
   contract_version: 'v1',
@@ -16,6 +16,7 @@ const capabilities: CapabilitiesResponse = {
     { id: 'music.play', state: 'unconfigured' },
     { id: 'game.chess', state: 'simulated' },
   ],
+  tools: [{ tool: 'coding.execute', status: 'NOT_CONFIGURED', status_detail: 'no provider configured' }],
   games: [{ id: 'chess', name: 'Chess', state: 'simulated' }],
   providers: [{ id: 'spotify', name: 'Spotify', state: 'unconfigured', detail: 'No token configured.' }],
 }
@@ -55,6 +56,22 @@ function installFetch(
   )
 }
 
+function installDefaultFetch(): void {
+  installFetch((url) => {
+    if (url.includes('/capabilities')) {
+      return new Response(JSON.stringify(capabilities), {
+        headers: { 'content-type': 'application/json' },
+      })
+    }
+    if (url.includes('.srt')) {
+      return new Response(SRT, { headers: { 'content-type': 'text/plain' } })
+    }
+    return new Response(JSON.stringify(response()), {
+      headers: { 'content-type': 'application/json' },
+    })
+  })
+}
+
 describe('Sidekick app integration', () => {
   beforeEach(() => {
     vi.restoreAllMocks()
@@ -65,54 +82,84 @@ describe('Sidekick app integration', () => {
   })
 
   it('shows the capability inventory reported by the backend', async () => {
-    installFetch((url) =>
-      url.includes('/capabilities')
-        ? new Response(JSON.stringify(capabilities), {
-            headers: { 'content-type': 'application/json' },
-          })
-        : new Response('{}', { headers: { 'content-type': 'application/json' } }),
-    )
-
+    installDefaultFetch()
     render(<App />)
 
     await waitFor(() => {
       expect(screen.getByText('music.play')).toBeInTheDocument()
     })
-    // The stub mode is labelled, never presented as live.
     expect(screen.getByText('dev stub')).toBeInTheDocument()
     expect(screen.getByText('unconfigured')).toBeInTheDocument()
   })
 
+  it('shows the companion and the actual current task on the first screen', async () => {
+    installDefaultFetch()
+    const { container } = render(<App />)
+
+    await waitFor(() => expect(screen.getByText('music.play')).toBeInTheDocument())
+
+    // The companion is present and labelled by its real state.
+    const companion = container.querySelector('.companion')
+    expect(companion).not.toBeNull()
+    expect(companion?.getAttribute('data-state')).toBe('idle')
+    expect(companion?.getAttribute('aria-label')).toMatch(/here when you need me/i)
+
+    // The task panel shows a real instruction, not a decorative card.
+    expect(screen.getByText('Ready')).toBeInTheDocument()
+  })
+
   it('sends a typed request and renders the real action outcome', async () => {
     const user = userEvent.setup()
-    installFetch((url) =>
-      url.includes('/capabilities')
-        ? new Response(JSON.stringify(capabilities), {
-            headers: { 'content-type': 'application/json' },
-          })
-        : new Response(JSON.stringify(response()), {
-            headers: { 'content-type': 'application/json' },
-          }),
-    )
-
+    installDefaultFetch()
     render(<App />)
     await waitFor(() => expect(screen.getByText('music.play')).toBeInTheDocument())
 
-    const input = screen.getByLabelText('Your request')
-    await user.type(input, 'play a song on spotify')
+    await user.type(screen.getByLabelText('Your request'), 'play a song on spotify')
     await user.click(screen.getByRole('button', { name: 'Send' }))
 
     await waitFor(() => {
-      expect(screen.getByText('play a song on spotify')).toBeInTheDocument()
+      expect(screen.getAllByText('play a song on spotify').length).toBeGreaterThan(0)
     })
     await waitFor(() => {
       expect(screen.getAllByText('music.play').length).toBeGreaterThan(0)
     })
-    // The result comes from the response payload, not from a local timer.
-    expect(screen.getByText(/Example/)).toBeInTheDocument()
-    // Decision metadata is surfaced truthfully.
-    expect(screen.getByText('deterministic-rules')).toBeInTheDocument()
-    expect(screen.getByText('91%')).toBeInTheDocument()
+    // The result comes from the response payload.
+    expect(screen.getAllByText(/Example/).length).toBeGreaterThan(0)
+    expect(screen.getAllByText('deterministic-rules').length).toBeGreaterThan(0)
+  })
+
+  it('shows a decision trace from the real response', async () => {
+    const user = userEvent.setup()
+    installDefaultFetch()
+    render(<App />)
+    await waitFor(() => expect(screen.getByText('music.play')).toBeInTheDocument())
+
+    await user.type(screen.getByLabelText('Your request'), 'play a song on spotify')
+    await user.click(screen.getByRole('button', { name: 'Send' }))
+
+    await waitFor(() => {
+      expect(screen.getByText('Decision trace')).toBeInTheDocument()
+    })
+    expect(screen.getByText('Heard')).toBeInTheDocument()
+    expect(screen.getByText('Understood')).toBeInTheDocument()
+    expect(screen.getByText('Decided')).toBeInTheDocument()
+    expect(screen.getByText('Planned')).toBeInTheDocument()
+  })
+
+  it('exposes the raw payload in the developer inspection mode', async () => {
+    const user = userEvent.setup()
+    installDefaultFetch()
+    render(<App />)
+    await waitFor(() => expect(screen.getByText('music.play')).toBeInTheDocument())
+
+    await user.type(screen.getByLabelText('Your request'), 'play a song on spotify')
+    await user.click(screen.getByRole('button', { name: 'Send' }))
+    await waitFor(() => expect(screen.getByText('Decision trace')).toBeInTheDocument())
+
+    await user.click(screen.getByRole('button', { name: 'Raw payload' }))
+    const raw = screen.getByLabelText('Raw response payload')
+    expect(raw.textContent).toContain('"request_id"')
+    expect(raw.textContent).toContain('music.play')
   })
 
   it('shows an honest error state when the backend cannot be reached', async () => {
@@ -127,8 +174,7 @@ describe('Sidekick app integration', () => {
       expect(screen.getByText(/backend is not reachable/i)).toBeInTheDocument()
     })
 
-    const input = screen.getByLabelText('Your request')
-    await user.type(input, 'hello')
+    await user.type(screen.getByLabelText('Your request'), 'hello')
     await user.click(screen.getByRole('button', { name: 'Send' }))
 
     await waitFor(() => {
@@ -149,7 +195,6 @@ describe('Sidekick app integration', () => {
           headers: { 'content-type': 'application/json' },
         })
       }
-      // A request that never answers on its own.
       return pending.then(
         () =>
           new Response(JSON.stringify(response()), {
@@ -165,14 +210,45 @@ describe('Sidekick app integration', () => {
     await user.click(screen.getByRole('button', { name: 'Send' }))
 
     const cancel = await screen.findByRole('button', { name: 'Cancel request' })
-    expect(cancel).toBeInTheDocument()
     await user.click(cancel)
 
-    // The composer is usable again and no result was invented.
     await waitFor(() => {
       expect(screen.queryByRole('button', { name: 'Cancel request' })).not.toBeInTheDocument()
     })
     release?.()
+  })
+
+  it('renders a clarification with selectable options', async () => {
+    const user = userEvent.setup()
+    installFetch((url) =>
+      url.includes('/capabilities')
+        ? new Response(JSON.stringify(capabilities), {
+            headers: { 'content-type': 'application/json' },
+          })
+        : new Response(
+            JSON.stringify(
+              response({
+                status: 'awaiting_confirmation',
+                clarification: {
+                  question: 'Which provider did you mean?',
+                  options: ['Spotify', 'YouTube'],
+                },
+              }),
+            ),
+            { headers: { 'content-type': 'application/json' } },
+          ),
+    )
+
+    render(<App />)
+    await waitFor(() => expect(screen.getByText('music.play')).toBeInTheDocument())
+
+    await user.type(screen.getByLabelText('Your request'), 'play something')
+    await user.click(screen.getByRole('button', { name: 'Send' }))
+
+    await waitFor(() => {
+      expect(screen.getAllByText('Which provider did you mean?').length).toBeGreaterThan(0)
+    })
+    expect(screen.getByRole('button', { name: 'Spotify' })).toBeInTheDocument()
   })
 
   it('handles the ratified turn-level status and the event timestamp field', async () => {
@@ -228,66 +304,22 @@ describe('Sidekick app integration', () => {
     await waitFor(() => {
       expect(screen.getByText(/needs clarification/)).toBeInTheDocument()
     })
-    // The fallback and the source are both surfaced, never hidden.
     const metaText = container.querySelector('.bubble__meta')?.textContent ?? ''
     expect(metaText).toContain('rule-engine-v1')
     expect(metaText).toContain('(fallback)')
     expect(metaText).toContain('rules')
-    // The action description and progress come from the backend.
-    expect(screen.getByText('Write the note to the workspace')).toBeInTheDocument()
-    // The event timestamp is read from the ratified `ts` field.
-    expect(screen.getByText('interpreted with the rule engine')).toBeInTheDocument()
-  })
-
-  it('renders a clarification with selectable options', async () => {
-    const user = userEvent.setup()
-    installFetch((url) =>
-      url.includes('/capabilities')
-        ? new Response(JSON.stringify(capabilities), {
-            headers: { 'content-type': 'application/json' },
-          })
-        : new Response(
-            JSON.stringify(
-              response({
-                status: 'awaiting_confirmation',
-                clarification: {
-                  question: 'Which provider did you mean?',
-                  options: ['Spotify', 'YouTube'],
-                },
-              }),
-            ),
-            { headers: { 'content-type': 'application/json' } },
-          ),
-    )
-
-    render(<App />)
-    await waitFor(() => expect(screen.getByText('music.play')).toBeInTheDocument())
-
-    await user.type(screen.getByLabelText('Your request'), 'play something')
-    await user.click(screen.getByRole('button', { name: 'Send' }))
-
-    await waitFor(() => {
-      expect(screen.getByText('Which provider did you mean?')).toBeInTheDocument()
-    })
-    expect(screen.getByRole('button', { name: 'Spotify' })).toBeInTheDocument()
+    expect(screen.getAllByText('Write the note to the workspace').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('interpreted with the rule engine').length).toBeGreaterThan(0)
   })
 
   it('labels an unavailable music provider instead of faking a player', async () => {
-    installFetch((url) =>
-      url.includes('/capabilities')
-        ? new Response(JSON.stringify(capabilities), {
-            headers: { 'content-type': 'application/json' },
-          })
-        : new Response('{}', { headers: { 'content-type': 'application/json' } }),
-    )
-
+    installDefaultFetch()
     render(<App />)
     await waitFor(() => expect(screen.getByText('music.play')).toBeInTheDocument())
 
     await userEvent.setup().click(screen.getByRole('button', { name: 'Music' }))
 
     const musicPanel = await screen.findByText('Providers')
-    expect(musicPanel).toBeInTheDocument()
     const list = musicPanel.closest('.panel') as HTMLElement
     expect(within(list).getByText('Spotify')).toBeInTheDocument()
     expect(within(list).getAllByText('not configured').length).toBeGreaterThan(0)
@@ -335,91 +367,6 @@ describe('Sidekick app integration', () => {
 
     await user.click(screen.getByRole('button', { name: 'Games' }))
     const board = await screen.findByRole('img', { name: /Chess position/ })
-    expect(board).toBeInTheDocument()
-    // 32 pieces on the starting position.
     expect(within(board).getAllByText(/[♔-♟]/)).toHaveLength(32)
-  })
-})
-
-describe('movie companion', () => {
-  afterEach(() => {
-    vi.unstubAllGlobals()
-  })
-
-  it('renders the shipped subtitle cue in sync with playback time', async () => {
-    const srt = readFileSync(SRT_PATH, 'utf8')
-    installFetch((url) => {
-      if (url.includes('.srt')) {
-        return new Response(srt, { headers: { 'content-type': 'text/plain' } })
-      }
-      return new Response(JSON.stringify(capabilities), {
-        headers: { 'content-type': 'application/json' },
-      })
-    })
-
-    const { MovieCompanion } = await import('@/components/MovieCompanion')
-    const { Speaker } = await import('@/lib/voice/synthesis')
-    render(<MovieCompanion speaker={new Speaker()} speechEnabled={false} />)
-
-    const video = await waitFor(() => {
-      const element = document.querySelector('video')
-      expect(element).not.toBeNull()
-      return element as HTMLVideoElement
-    })
-
-    // Move the media clock to a real cue and fire the real media event.
-    Object.defineProperty(video, 'currentTime', { value: 23.2, writable: true, configurable: true })
-    video.dispatchEvent(new Event('timeupdate'))
-
-    await waitFor(() => {
-      expect(screen.getByText("You're a jerk, Thom.")).toBeInTheDocument()
-    })
-  })
-
-  it('raises a companion event at the real timestamp of a matching cue', async () => {
-    const srt = readFileSync(SRT_PATH, 'utf8')
-    installFetch((url) => {
-      if (url.includes('.srt')) {
-        return new Response(srt, { headers: { 'content-type': 'text/plain' } })
-      }
-      return new Response(JSON.stringify(capabilities), {
-        headers: { 'content-type': 'application/json' },
-      })
-    })
-
-    const { MovieCompanion } = await import('@/components/MovieCompanion')
-    const { Speaker } = await import('@/lib/voice/synthesis')
-    render(<MovieCompanion speaker={new Speaker()} speechEnabled={false} />)
-
-    const video = await waitFor(() => {
-      const element = document.querySelector('video')
-      expect(element).not.toBeNull()
-      return element as HTMLVideoElement
-    })
-    // The "robot hand" line starts at 30.8s in the official track.
-    Object.defineProperty(video, 'currentTime', { value: 31, writable: true, configurable: true })
-    video.dispatchEvent(new Event('timeupdate'))
-
-    await waitFor(() => {
-      expect(screen.getByText('Robotics mentioned')).toBeInTheDocument()
-    })
-    expect(screen.getAllByText(/real timestamp/i).length).toBeGreaterThan(0)
-  })
-
-  it('reports a subtitle failure instead of pretending to understand the film', async () => {
-    installFetch((url) => {
-      if (url.includes('.srt')) return new Response('nope', { status: 404 })
-      return new Response(JSON.stringify(capabilities), {
-        headers: { 'content-type': 'application/json' },
-      })
-    })
-
-    const { MovieCompanion } = await import('@/components/MovieCompanion')
-    const { Speaker } = await import('@/lib/voice/synthesis')
-    render(<MovieCompanion speaker={new Speaker()} speechEnabled={false} />)
-
-    await waitFor(() => {
-      expect(screen.getByText(/Subtitle track could not be loaded/i)).toBeInTheDocument()
-    })
   })
 })

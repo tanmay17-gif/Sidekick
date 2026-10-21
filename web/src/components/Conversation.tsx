@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react'
 import type { Action, ActionState, ProgressEvent, SidekickResponse } from '@/lib/api/types'
+import { ExecutionResultView } from './ExecutionResult'
 import { AlertIcon, CheckIcon, ChatIcon, MicIcon } from './icons'
 import { Dot } from './ui'
 
@@ -228,12 +229,7 @@ function ActionCard({ action, index }: { action: Action; index: number }) {
             <span style={{ width: `${Math.round(action.progress * 100)}%` }} />
           </div>
         ) : null}
-        {action.error ? (
-          <div className="plan__args" style={{ color: 'var(--state-danger)' }}>
-            {action.error.code}: {action.error.message}
-          </div>
-        ) : null}
-        <ActionResult result={action.result} />
+        <ExecutionResultView action={action} />
       </div>
       <span className="plan__state">
         <span className="badge badge--quiet">
@@ -241,69 +237,6 @@ function ActionCard({ action, index }: { action: Action; index: number }) {
           {STATE_LABEL[action.state] ?? action.state}
         </span>
       </span>
-    </div>
-  )
-}
-
-function ActionResult({ result }: { result: unknown }) {
-  if (result === undefined || result === null) return null
-  const diff = extractDiff(result)
-  if (diff) {
-    return <DiffView diff={diff} />
-  }
-  if (typeof result === 'string') {
-    return <pre className="plan__result">{result}</pre>
-  }
-  return <pre className="plan__result">{safeJson(result)}</pre>
-}
-
-function extractDiff(result: unknown): string | null {
-  if (typeof result === 'string') {
-    return result.includes('@@') ? result : null
-  }
-  if (result && typeof result === 'object') {
-    const record = result as Record<string, unknown>
-    if (typeof record.diff === 'string' && record.diff.includes('@@')) return record.diff
-    const files = record.files
-    if (Array.isArray(files)) {
-      const chunks = files
-        .map((file) => {
-          if (!file || typeof file !== 'object') return ''
-          const entry = file as Record<string, unknown>
-          const path = typeof entry.path === 'string' ? entry.path : 'file'
-          const patch = typeof entry.diff === 'string' ? entry.diff : ''
-          return patch ? `--- a/${path}\n+++ b/${path}\n${patch}` : ''
-        })
-        .filter(Boolean)
-        .join('\n')
-      return chunks || null
-    }
-  }
-  return null
-}
-
-export function DiffView({ diff }: { diff: string }) {
-  const lines = diff.split('\n')
-  return (
-    <div className="diff">
-      <div className="diff__file">
-        <AlertIcon size={12} />
-        unified diff
-      </div>
-      <pre className="diff__body">
-        {lines.map((line, index) => {
-          let variant = 'ctx'
-          if (line.startsWith('+++') || line.startsWith('---')) variant = 'ctx'
-          else if (line.startsWith('@@')) variant = 'hunk'
-          else if (line.startsWith('+')) variant = 'add'
-          else if (line.startsWith('-')) variant = 'del'
-          return (
-            <div key={index} className={`diff__line diff__line--${variant}`}>
-              {line || ' '}
-            </div>
-          )
-        })}
-      </pre>
     </div>
   )
 }

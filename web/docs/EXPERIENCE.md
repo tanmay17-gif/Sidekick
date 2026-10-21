@@ -12,60 +12,73 @@ defined in `.sidekick/TEAM_PLAYBOOK.md` §8.
 | Spoken responses (text-to-speech) | `REAL_AND_VERIFIED` in Chromium | `web/src/lib/voice/synthesis.ts`; chunking, cancellation and the "engine never starts" watchdog are unit tested. |
 | Request / response contract | `REAL_AND_VERIFIED` | `web/src/lib/api/client.ts` implements `.sidekick/API_CONTRACTS.md` v1. Session id is sent in both the `x-sidekick-session-id` header and the body field. |
 | Backend error surfacing | `REAL_AND_VERIFIED` | Transport failure, timeout, HTTP error and contract violation are all distinct, tested states. |
-| Movie playback | `REAL_AND_VERIFIED` | Real MP4 (`tears_of_steel_720p.mp4`) with native controls; the E2E suite covers the load-failure recovery path. |
-| Subtitle synchronisation | `REAL_AND_VERIFIED` | Cue lookup is a pure function over `video.currentTime`; verified by unit tests against the shipped official track and by an integration test that moves the media clock. |
-| Companion events | `REAL_AND_VERIFIED` (subtitle-based) | Each event timestamp is the real start time of a real cue. No vision pipeline exists, and the UI says so. |
-| Intent resolution / decision engine | `REAL_AND_VERIFIED` against the real backend | Verified on 2026-10-21 against Agent 1's `sidekick/api` implementation (branch `agent1/core-brain-v1`): the client showed `backend LIVE`, the real tool inventory, the streamed progress events and the action the real engine chose. Re-run with `node scripts/verify-real-backend.mjs`. |
-| Coding job execution and diff | `REAL_BUT_UNVERIFIED` | The client renders the real diff from the response payload (including unified-diff line colouring). The job itself is Agent 2's and was not exercised end-to-end by this client. |
+| Decision trace | `REAL_AND_VERIFIED` | Every step renders a field the backend actually sent; where the backend reports no reason, the trace says so. Unit tested plus an end-to-end check that the raw payload is inspectable. |
+| Movie playback | `REAL_AND_VERIFIED` | The bundled *Letter V* really plays; the E2E suite waits for `readyState >= 1`, asserts a real duration and plays it. |
+| Subtitle synchronisation | `REAL_AND_VERIFIED` | Cue lookup is a pure function over `video.currentTime`; the E2E suite plays the film and asserts the caption shown matches the real playback position. |
+| Movie Buddy reactions | `REAL_AND_VERIFIED` (caption-based) | Each reaction fires on a real caption line that satisfies a real rule. The trigger is recorded and shown in "Why did Sidekick react?". |
+| Intent resolution / decision engine | `REAL_AND_VERIFIED` against the real backend | Verified on 2026-10-21 against the merged core (`main` @ `fcd2427`): the client showed `backend LIVE`, the real tool inventory, the streamed progress events and the action the real engine chose. Re-run with `node scripts/verify-real-backend.mjs`. |
+| Coding job execution and diff | `REAL_BUT_UNVERIFIED` | The client renders the real diff, the changed-file list and the real test result (Agent 2's issue #6 is closed on this side). The execution service was not reachable from this environment, so the end-to-end path is unproven. |
 | Music providers | `NOT_CONFIGURED` | No provider credentials exist. The UI shows the provider list with `unconfigured` state and explains what is needed. |
 | Chess | `REAL_BUT_UNVERIFIED` | The board is rendered from the FEN the backend reports; move legality is never decided in the browser. |
-| Tic-Tac-Toe (local) | `REAL_AND_VERIFIED` | The opponent is a real minimax search over the rules in `web/src/lib/games/tictactoe.ts`. It is labelled `local` so it is never confused with a backend-backed game. |
-| 2048 (local) | `REAL_AND_VERIFIED` | The real merge rules in `web/src/lib/games/game2048.ts`. A tile merges once per move, exactly as in 2048. |
+| Local games (tic-tac-toe, 2048) | `REAL_AND_VERIFIED` | The rules, the minimax opponent and the board state are real and run in the browser. Labelled `local`. |
 | Alexa+ | `NOT_IMPLEMENTED` | No Alexa skill is implemented. The browser uses the Web Speech API, which is **not** an Alexa+ integration and must not be presented as one. |
+| A real coding model provider | `NOT_CONFIGURED` | No `SIDEKICK_LLM_API_KEY` and no local coding CLI exists on any agent machine (Agent 2 reports the same). The capability report says `NOT_CONFIGURED`, so the interface shows the truthful status rather than a broken button. |
 
-### Games are not just chess
+### Verified against the merged core
 
-The games surface has two clearly separated groups:
-
-- **Backend games** - whatever the backend reports through
-  `capabilities.games`, with the state it reported. The browser only renders
-  them and never decides a move.
-- **Local activities** - games that ship with the client and need no service at
-  all. Their rules, opponent and state are real and run in the browser, and
-  they are marked `local` so nobody mistakes them for a service response.
-
-`web/src/lib/games/registry.ts` is the single place to add another local
-activity.
-
-### Verified against Agent 1's real backend
-
-On 2026-10-21 the client was run against Agent 1's actual FastAPI backend
-(`sidekick/api/app.py`, branch `agent1/core-brain-v1`), served through the Vite
-proxy:
+On 2026-10-21 the client was run against the **merged** core (`main` @ `fcd2427`),
+served through the Vite proxy:
 
 - the capability strip read `backend LIVE` and listed the five real tools
   (`note.write`, `note.read`, `timer.set`, `timer.list`, `media.open`);
 - a typed request was resolved by the real engine, which chose `note.write`
   and **actually wrote the note to disk** - the result payload showed the real
   path, byte count and title;
-- the streamed progress events arrived over the event stream with real
-  timestamps ("interpreted with sidekick/rule-engine-v1", "1 action(s) planned",
-  "note.write started", "note.write succeeded");
-- the response metadata showed the real provider and model
-  (`sidekick` / `rule-engine-v1`, `fallback_used: true`), which the client
-  surfaces as `rule-engine-v1 (fallback)` rather than hiding the fallback.
+- the **event stream** worked against the real backend: "interpreted with
+  sidekick/rule-engine-v1", "1 action(s) planned", "note.write started",
+  "note.write succeeded", each with a real timestamp;
+- the response metadata showed the real provider and model, and the client
+  surfaces `fallback_used: true` as `rule-engine-v1 (fallback)` rather than
+  hiding the fallback.
 
 `web/scripts/verify-real-backend.mjs` automates those checks. It is kept out of
 `npm run test:e2e` because it needs the Python backend running:
 
 ```bash
 # terminal 1 - the real backend
-uvicorn sidekick.api.app:create_app --factory --host 127.0.0.1 --port 8033
+python -m uvicorn sidekick.api.app:create_app --factory --host 127.0.0.1 --port 8040
 # terminal 2 - the built client, pointed at it
-SIDECKICK_API_TARGET=http://127.0.0.1:8033 npx vite preview --port 4175
+SIDECKICK_API_TARGET=http://127.0.0.1:8040 npx vite preview --port 4178
 # terminal 3
-node scripts/verify-real-backend.mjs http://127.0.0.1:4175 http://127.0.0.1:8033
+node scripts/verify-real-backend.mjs http://127.0.0.1:4178 http://127.0.0.1:8040
 ```
+
+## The decision trace
+
+The trace is the difference between "the AI did something" and "here is what
+Sidekick understood, chose and did". It shows:
+
+1. **Heard** - the utterance and whether it came from the microphone or the
+   keyboard.
+2. **Understood** - the normalized intent, the confidence, whether the backend
+   marked it ambiguous, and how many entities it extracted.
+3. **Decided** - the provider, the model, the source, whether a fallback ran,
+   and the risk level.
+4. **Planned** - every action with its tool, description, arguments and
+   approval state.
+5. **Asked** - the clarification, when the backend asked one. The trace notes
+   that the backend reported the question but not the internal reason for it.
+6. **Acted** - the events, with their sequence numbers, types and timestamps.
+7. **Result** - the outcome, the error code, the changed files, the test result
+   and the diff.
+
+Nothing in the trace is a rationale the browser invented. Where the contract
+does not expose a reason, the trace shows the observed facts and says the
+reason is unavailable.
+
+The raw response payload is one click away (`Raw payload`) for the demo, and
+it is hidden by default so the main surface does not look like a debugging
+tool.
 
 ## Voice input - real behaviour and limits
 
@@ -89,6 +102,8 @@ node scripts/verify-real-backend.mjs http://127.0.0.1:4175 http://127.0.0.1:8033
 - **Interruption.** While the assistant is speaking the microphone button becomes
   an interrupt control: it cancels the speech synthesis queue and aborts the
   in-flight request.
+- **Voice errors never disable the text field.** The error is shown next to the
+  composer and the composer keeps working.
 
 ### Known browser limits
 
@@ -115,44 +130,36 @@ node scripts/verify-real-backend.mjs http://127.0.0.1:4175 http://127.0.0.1:8033
   "speaking".
 - Pressing the microphone while speaking cancels the queue immediately.
 
-## Movie companion - what "real" means here
+## Movie Buddy
 
-- **Media.** *Tears of Steel* (2012), Blender Foundation / MPEG, **CC BY 3.0**.
-  The stream is the Internet Archive's `tears_of_steel_720p.mp4` derivative
-  (faststart H.264/AAC, HTTP range support, so seeking works).
-- **Subtitles.** The official English subtitle file `TOS-en.srt` from
-  `download.blender.org` is committed at
-  `web/public/media/tears-of-steel/TOS-en.srt` and parsed in the browser.
-  The 76 cue timings are the timings of the shipped file - nothing is invented.
-  The same cues are re-serialised to WebVTT and attached to the `<video>`
-  element as a real `<track kind="subtitles">`, so the native player shows
-  captions too.
-- **Events.** A companion event fires when playback reaches the exact start
-  timestamp of a cue whose text matches a rule. The event shows the timestamp,
-  the line that triggered it, and why it appeared. There is **no visual
-  analysis** - the interface labels the understanding as subtitle-based.
-- **Modes.** `Quiet` (no cards, no speech), `Brief` (speaks a short line) and
-  `Cards` (raises a card). In `Brief` mode the companion only speaks while no
-  cue is on screen, so it never talks over dialogue.
-- **Recovery.** If the video or the subtitle track cannot be loaded, the
-  surface says so and the rest of the interface keeps working. A subtitle
-  failure disables companion events rather than faking understanding.
+Movie Buddy is a **companion mode**, not a film. Switching it on is
+independent of which film is playing: "Turn on Movie Buddy" works with any
+source, and the film can be chosen before or after.
 
-### Media licensing
+- **Commands** (spoken or typed): turn on / turn off / resume Movie Buddy,
+  be quiet, what just happened, explain that moment, pause, go back 30
+  seconds, and "play me a movie and turn on Movie Buddy".
+- **Activation** sets the mode; it never selects a film. When no media is
+  available the surface offers the bundled open-licensed film and a file
+  picker.
+- **Reactions** only happen when a real caption line satisfies a real rule.
+  The rules are: the first line of the track, a line that states a plan, a
+  line marked as a sound, a step, a step that repeats an earlier one with a
+  variation, and the final line. Blank caption lines never trigger anything.
+- **The companion is deliberately quiet.** It has a speaking budget of three
+  remarks a minute, a twelve-second cooldown, and it never speaks while a
+  caption is on screen. `Quiet` stops it immediately for a minute.
+- **Answers are grounded.** "What just happened?" quotes the captions from the
+  last 45 seconds. "Explain that moment?" quotes the captions around the
+  moment. When no caption covers the moment the answer says exactly that, and
+  states that there is no picture analysis.
+- **"Why did Sidekick react?"** shows the actual trigger: the rule that fired
+  and the caption line with its timestamp. It also shows what the companion
+  would be holding back for right now (a caption on screen, the budget, the
+  cooldown, quiet mode).
 
-The subtitle file is redistributed under CC BY 3.0 with attribution shown in
-the UI ("Tears of Steel - Blender Foundation / MPEG (CC BY 3.0)"). The video is
-streamed from the Internet Archive rather than vendored into the repository.
-No copyrighted material is scraped or redistributed by this client.
-
-## Why the movie companion is not a fake subtitle demo
-
-The previous shape of this feature - a repeating timer that pops up a caption
-every few seconds - is exactly what this implementation replaces. Here the
-timeline is `video.currentTime`; the cue index is a binary search over the
-parsed cue list; seeking recomputes immediately; pausing stops the clock. A
-test asserts that every companion event timestamp equals the start time of a
-real cue.
+See `MOVIE_SOURCES.md` for the film, the rights evidence and the exact
+limits on what the companion can observe.
 
 ## Integration notes for the other agents
 
@@ -160,5 +167,10 @@ real cue.
   non-contract body or a missing provider all produce their own visible state.
 - Capability badges come from the backend's `/capabilities` response. If the
   backend reports a capability as `simulated`, the interface says `simulated`.
+  The execution vocabulary (`REAL | SIMULATED | NOT_CONFIGURED | NOT_IMPLEMENTED
+  | UNAVAILABLE`) is rendered verbatim next to the browser vocabulary.
 - The browser sends the session id in both the header and the body, and honours
   the documented precedence (header wins).
+- Agent 2's issue #6 is closed on this side: an action result now shows the
+  diff, the changed-file list **and** the test result together, and a
+  `partial` outcome is never rendered as a success.

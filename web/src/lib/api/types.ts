@@ -92,6 +92,8 @@ export interface Action {
   superseded_by: string | null
   /** Human readable description of the action. */
   description?: string
+  /** Fingerprint of the tool plus its arguments; a confirmation binds to it. */
+  plan_hash?: string
   /** The execution job that carries this action, when there is one. */
   job_id?: string
   /** Progress between 0 and 1, when the backend reports it. */
@@ -99,6 +101,50 @@ export interface Action {
   result?: unknown
   error?: ContractError
   timestamps: ActionTimestamps
+}
+
+/* ------------------------------------------------------------------ *
+ * Execution results
+ * ------------------------------------------------------------------ */
+
+export interface ChangedFile {
+  path: string
+  status?: string
+}
+
+export interface TestResult {
+  argv?: string[]
+  exit_code?: number
+  passed?: boolean
+  /** Populated only when the runner actually printed counts. */
+  counts?: Record<string, number>
+  counts_available?: boolean
+  summary?: string
+  duration_ms?: number
+  timed_out?: boolean
+  cancelled?: boolean
+  truncated?: boolean
+}
+
+export interface ExecutionResult {
+  /** `partial` means real changes were applied but the required tests failed. */
+  outcome?: 'succeeded' | 'partial' | 'failed' | 'cancelled'
+  summary?: string
+  workspace?: string
+  changed_files?: ChangedFile[]
+  diff?: string
+  diff_truncated?: boolean
+  head_sha?: string
+  provider?: {
+    name?: string
+    level?: string
+    simulated?: boolean
+    available?: boolean
+    reason?: string
+    model?: string
+    latency_ms?: number
+  }
+  test_result?: TestResult
 }
 
 export interface Clarification {
@@ -188,11 +234,38 @@ export interface ProviderDescriptor {
   requires_user_action?: boolean
 }
 
+/**
+ * The execution service's vocabulary for the same capability. Rendered
+ * verbatim - the browser never converts one vocabulary into the other.
+ */
+export type ToolStatus =
+  | 'REAL'
+  | 'SIMULATED'
+  | 'NOT_CONFIGURED'
+  | 'NOT_IMPLEMENTED'
+  | 'UNAVAILABLE'
+
+export interface ToolDescriptor {
+  tool: string
+  description?: string
+  arguments_schema?: Record<string, unknown>
+  approval_required?: boolean
+  risk_level?: string
+  status: ToolStatus
+  status_detail?: string
+  simulated?: boolean
+}
+
 export interface CapabilitiesResponse {
   contract_version: string
   /** `live` = talking to the real backend, `stub` = local development double. */
   mode: 'live' | 'stub'
   capabilities: Capability[]
+  /** The execution service's own status vocabulary. */
+  tools?: ToolDescriptor[]
+  tool_count?: number
+  status_counts?: Record<string, number>
+  any_simulated?: boolean
   games?: GameDescriptor[]
   providers?: ProviderDescriptor[]
 }
@@ -209,6 +282,12 @@ export interface CompanionRule {
   reason: string
 }
 
+export interface MediaSource {
+  src: string
+  mime_type: string
+  label: string
+}
+
 export interface MediaAsset {
   id: string
   title: string
@@ -218,6 +297,12 @@ export interface MediaAsset {
   /** Streamable source. */
   src: string
   mime_type: string
+  /**
+   * Alternative encodes of the same film. The player offers them in order and
+   * the browser picks the first one it can decode - a codec-limited browser
+   * still gets the film.
+   */
+  sources?: MediaSource[]
   /** Subtitle source (local file shipped with the app). */
   subtitle_src: string
   subtitle_label: string
@@ -225,6 +310,8 @@ export interface MediaAsset {
   cues: MediaCue[]
   /** Rules that map subtitle cues to companion events. */
   companion_rules: CompanionRule[]
+  /** True when the media file ships with the app. */
+  bundled?: boolean
   duration_hint_seconds?: number
 }
 

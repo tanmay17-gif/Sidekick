@@ -25,6 +25,20 @@ export const ENDPOINTS = {
   /** Action status polling (used when streaming is unavailable). */
   action: (actionId: string) =>
     pick('VITE_SIDECKITCH_ACTION_PATH', '/api/v1/actions/:id').replace(':id', actionId),
+  /** The live event stream of one action; `after` resumes it after a gap. */
+  actionEvents: (actionId: string, afterSeq: number | null) => {
+    const base = pick('VITE_SIDECKICK_ACTION_EVENTS_PATH', '/api/v1/actions/:id/events').replace(
+      ':id',
+      actionId,
+    )
+    return afterSeq === null ? base : `${base}?after=${afterSeq}`
+  },
+  /** Approve or refuse a pending action. */
+  approve: (actionId: string) =>
+    pick('VITE_SIDECKICK_APPROVE_PATH', '/api/v1/actions/:id/approve').replace(':id', actionId),
+  /** Cancel a pending or running action. */
+  cancel: (actionId: string) =>
+    pick('VITE_SIDECKICK_CANCEL_PATH', '/api/v1/actions/:id/cancel').replace(':id', actionId),
 } as const
 
 /**

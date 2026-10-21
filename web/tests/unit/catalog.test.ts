@@ -94,6 +94,6 @@ describe('media catalog', () => {
     const fetchImpl = vi.fn(async () => new Response('nope', { status: 404 }))
     const result = await loadMediaCatalog({ fetchImpl: fetchImpl as never })
     expect(result.asset.cues).toHaveLength(0)
-    expect(result.warnings.join(' ')).toMatch(/subtitle track could not be loaded/i)
+    expect(result.warnings.join(' ')).toMatch(/captions for .* could not be loaded/i)
   })
 })

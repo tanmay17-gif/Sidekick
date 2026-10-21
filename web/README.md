@@ -1,21 +1,24 @@
 # Sidekick web client
 
 The browser surface of Sidekick: voice in, decision engine out, real outcomes on
-screen. This package is owned by **Agent 3 (Product Experience)**.
+screen, and a movie companion that reads the captions of the film you are
+actually watching. This package is owned by **Agent 3 (Product Experience)**.
 
 ```
 web/
   src/
     lib/api/          contract v1 client, types, error normalisation
     lib/voice/        Web Speech recognition + synthesis wrappers
-    lib/media/        subtitle parsing, cue lookup, companion events
-    lib/games/        FEN rendering helpers
+    lib/media/        subtitle parsing, cue lookup, the movie player state
+    lib/movie/        the Movie Buddy brain and its control commands
+    lib/games/        FEN rendering, local game rules
     state/            the conversation state machine
     components/       the interface
+  public/media/       the openly licensed film and its captions
   dev/stub-server.mjs SIMULATED_TEST_ONLY development backend
   tests/unit/         unit + integration tests (Vitest)
   tests/e2e/          end-to-end tests (Playwright)
-  docs/               experience notes and contract proposals
+  docs/               experience notes, rights evidence, demo script
 ```
 
 ## Run it
@@ -29,6 +32,15 @@ npm run dev      # terminal 2 - Vite dev server on 127.0.0.1:5173
 `npm run dev` proxies `/api/*` to the backend, so the browser only ever talks
 to one origin.
 
+### Against the real backend
+
+```bash
+# terminal 1 - the real core
+python -m uvicorn sidekick.api.app:create_app --factory --host 127.0.0.1 --port 8040
+# terminal 2 - the built client, pointed at it
+SIDECKICK_API_TARGET=http://127.0.0.1:8040 npm run build && npx vite preview --port 4178
+```
+
 ## Verify it
 
 ```bash
@@ -36,23 +48,15 @@ npm run lint        # eslint
 npm run typecheck   # tsc --noEmit
 npm run test        # vitest (unit + integration)
 npm run build       # typecheck + production build
-npm run test:e2e    # playwright (real browser, real HTTP)
+npm run test:e2e    # playwright (real browser, real HTTP, real media playback)
 ```
 
 `npm run verify` runs lint, typecheck, unit tests and the build in one go.
 
 ### Against the real backend
 
-`npm run test:e2e` runs against the labelled development stub. To check the
-client against a **real** Sidekick backend:
-
 ```bash
-# terminal 1 - the real backend
-uvicorn sidekick.api.app:create_app --factory --host 127.0.0.1 --port 8033
-# terminal 2 - the built client, pointed at it
-SIDECKICK_API_TARGET=http://127.0.0.1:8033 npx vite preview --port 4175
-# terminal 3
-node scripts/verify-real-backend.mjs http://127.0.0.1:4175 http://127.0.0.1:8033
+node scripts/verify-real-backend.mjs http://127.0.0.1:4178 http://127.0.0.1:8040
 ```
 
 The script asserts that the capability strip reports the backend's own mode,
@@ -65,9 +69,13 @@ real engine with the tool it chose, and that nothing is faked in the client.
 |---|---|---|
 | Microphone input | **REAL** | Web Speech API (`SpeechRecognition`). Not Alexa+. |
 | Spoken responses | **REAL** | Web Speech Synthesis API, with a watchdog for engines that never start. |
-| Intent resolution | **Contract only** | The browser sends the v1 request and renders the v1 response. The resolver itself belongs to Agent 1. |
-| Movie companion | **REAL** | Real MP4 playback, real subtitle cues from the shipped official track, events driven by `video.currentTime`. |
-| Music / games | **Backend driven** | Only what the backend reports is shown. Nothing is faked. |
+| Intent resolution | **REAL** (against the merged core) | Verified end to end; the request is answered by the real engine and the real note is written to disk. |
+| Decision trace | **REAL** | Every field comes from the backend response. |
+| Movie playback | **REAL** | A bundled public-domain film, played for real, with its own captions. |
+| Movie Buddy | **REAL, caption-based** | Reactions fire on real caption lines. There is **no visual analysis** and the interface says so. |
+| Coding job diff | **REAL, unverified end to end** | The client renders the real diff, changed files and test result. The execution service was not reachable from this environment. |
+| Music / game providers | **NOT CONFIGURED** | No credentials. The interface explains what is needed instead of faking a player. |
+| Alexa+ | **NOT IMPLEMENTED** | The Web Speech API is not Alexa+ and is never presented as one. |
 
 The `npm run stub` backend is a **development double**. It answers the v1
 contract so the client can be built and tested before the real services exist,
@@ -77,12 +85,13 @@ presenting it as live.
 See `docs/EXPERIENCE.md` for the full capability matrix and the browser
 limitations that matter for the demo.
 
-| Document | Purpose |
-|---|---|
-| `docs/EXPERIENCE.md` | Capability matrix, claim levels, voice and media limits |
-| `docs/CONTRACT_NOTES.md` | Endpoint and capabilities proposals for Agent 1 |
-| `docs/PREREQUISITES.md` | Phase 0 inventory (`A3-AUDIT`): toolchain, credentials, voice, media, backend needs |
-| `docs/DEMO.md` | Step-by-step walkthrough for demonstrating the client |
+## The movie
+
+The companion plays **Letter V** - a public-domain (CC0 1.0) short that is
+bundled with the app, with its own hand-authored English caption track. A
+second film, *Tears of Steel* (CC BY 3.0), is streamed from the Internet
+Archive. The exact copies, the rights evidence and the limits are in
+`docs/MOVIE_SOURCES.md`.
 
 ## Configuration
 
@@ -92,6 +101,9 @@ limitations that matter for the demo.
 | `VITE_SIDECKICK_INTERPRET_PATH` | `/api/v1/requests` | Request endpoint. |
 | `VITE_SIDECKICK_CAPABILITIES_PATH` | `/api/v1/capabilities` | Capability inventory endpoint. |
 | `VITE_SIDECKICK_MEDIA_PATH` | `/api/v1/media/catalog` | Media catalog endpoint. |
+| `VITE_SIDECKICK_ACTION_EVENTS_PATH` | `/api/v1/actions/:id/events` | Live action event stream. |
+| `VITE_SIDECKICK_APPROVE_PATH` | `/api/v1/actions/:id/approve` | Approval endpoint. |
+| `VITE_SIDECKICK_CANCEL_PATH` | `/api/v1/actions/:id/cancel` | Cancellation endpoint. |
 | `SIDECKICK_API_TARGET` | `http://127.0.0.1:8000` | Dev proxy target (build/run side). |
 
 Only paths are configurable - the request and response shapes come from

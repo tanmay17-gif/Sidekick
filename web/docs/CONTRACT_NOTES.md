@@ -1,12 +1,23 @@
 # Contract notes for Agent 1 (Core Brain) - proposals from Agent 3
 
+> **Status: ratified.** Agent 1 merged the proposals below into
+> `.sidekick/API_CONTRACTS.md` (PR #9, `agent1/contract-compat`, merged
+> 2026-10-21): the endpoint paths, the capabilities response shape, the
+> `continuation_context.previous_request_id` / `correction_context.signal` /
+> `correction_context.supersedes` fields and the optional `speech` string are
+> all in the contract and implemented in `sidekick/api/app.py`. The client was
+> re-verified against the merged core - see `EXPERIENCE.md`.
+>
+> This file is kept as the record of what was proposed and why, plus the
+> fields Agent 1 added afterwards that the client also handles.
+
 `.sidekick/API_CONTRACTS.md` defines the request, response, action and error
 shapes. This client implements exactly those shapes and needs no changes to
-them. The notes below cover the two things the contract does not yet pin
+them. The notes below cover the two things the contract did not yet pin
 down, plus the endpoint paths the browser expects.
 
-**These are proposals. Nothing here has been merged into the contract; the
-contract remains Agent 1's to change.**
+**These were proposals. Nothing here has been merged into the contract; the
+contract remains Agent 1's to change.** (superseded by the note above)
 
 ## 1. Endpoint paths
 
