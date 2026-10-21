@@ -1265,6 +1265,38 @@ class DecisionEngine:
         return action
 
     # ------------------------------------------------------------------
+    # Event streaming
+    # ------------------------------------------------------------------
+
+    def action_events(
+        self, session_id: str, action_id: str, after_seq: int = 0
+    ) -> list[Event]:
+        """The events already logged for one action."""
+        session = self.sessions.peek(session_id)
+        if session is None:
+            return []
+        return session.events_after(after_seq, action_id=action_id)
+
+    def wait_for_action_events(
+        self,
+        session_id: str,
+        action_id: str,
+        after_seq: int = 0,
+        timeout: float = 1.0,
+    ) -> list[Event]:
+        """Wait for new events of one action and return them."""
+        session = self.sessions.peek(session_id)
+        if session is None:
+            return []
+        return session.wait_for_events(after_seq, action_id=action_id, timeout=timeout)
+
+    def get_action(self, session_id: str, action_id: str) -> Action | None:
+        session = self.sessions.peek(session_id)
+        if session is None:
+            return None
+        return session.get_action(action_id)
+
+    # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
 
