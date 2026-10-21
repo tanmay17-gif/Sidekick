@@ -59,6 +59,13 @@ presenting it as live.
 See `docs/EXPERIENCE.md` for the full capability matrix and the browser
 limitations that matter for the demo.
 
+| Document | Purpose |
+|---|---|
+| `docs/EXPERIENCE.md` | Capability matrix, claim levels, voice and media limits |
+| `docs/CONTRACT_NOTES.md` | Endpoint and capabilities proposals for Agent 1 |
+| `docs/PREREQUISITES.md` | Phase 0 inventory (`A3-AUDIT`): toolchain, credentials, voice, media, backend needs |
+| `docs/DEMO.md` | Step-by-step walkthrough for demonstrating the client |
+
 ## Configuration
 
 | Variable | Default | Purpose |

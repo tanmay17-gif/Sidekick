@@ -142,3 +142,42 @@ test('shows the games the backend reports and renders the reported board', async
   await expect(page.locator('.list__title', { hasText: 'Chess' })).toBeVisible()
   await expect(page.locator('.list__row').first().getByText('simulated')).toBeVisible()
 })
+
+test('isolates two concurrent sessions', async ({ browser }) => {
+  const contextA = await browser.newContext()
+  const contextB = await browser.newContext()
+  const pageA = await contextA.newPage()
+  const pageB = await contextB.newPage()
+
+  await pageA.goto('/')
+  await pageB.goto('/')
+
+  const sessionA = await pageA.locator('.session__id').innerText()
+  const sessionB = await pageB.locator('.session__id').innerText()
+  expect(sessionA).not.toEqual(sessionB)
+
+  // A request in one session must not appear in the other.
+  await pageA.getByLabel('Your request').fill('play a song on spotify')
+  await pageA.getByRole('button', { name: 'Send' }).click()
+  await expect(pageA.locator('.plan__item').first()).toBeVisible()
+
+  await expect(pageB.locator('.turn')).toHaveCount(0)
+  await expect(pageB.getByText('Nothing asked yet')).toBeVisible()
+
+  await contextA.close()
+  await contextB.close()
+})
+
+test('recovers from a disconnect and starts a clean session on demand', async ({ page }) => {
+  await page.getByLabel('Your request').fill('play a song on spotify')
+  await page.getByRole('button', { name: 'Send' }).click()
+  await expect(page.locator('.plan__item').first()).toBeVisible()
+
+  const before = await page.locator('.session__id').innerText()
+  await page.getByRole('button', { name: 'New session' }).click()
+
+  const after = await page.locator('.session__id').innerText()
+  expect(after).not.toEqual(before)
+  await expect(page.getByText('Nothing asked yet')).toBeVisible()
+  await expect(page.locator('.turn')).toHaveCount(0)
+})
