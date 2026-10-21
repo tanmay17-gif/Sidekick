@@ -6,7 +6,7 @@ import { resolve } from 'node:path'
 import { MovieBuddy } from '@/components/MovieBuddy'
 import { Speaker } from '@/lib/voice/synthesis'
 
-const SRT = readFileSync(resolve(process.cwd(), 'public/media/letter-v/letter-v.srt'), 'utf8')
+const SRT = readFileSync(resolve(process.cwd(), 'public/media/duck-and-cover/duck-and-cover.srt'), 'utf8')
 
 function installFetch(): void {
   vi.stubGlobal(
@@ -60,6 +60,7 @@ describe('Movie Buddy', () => {
       expect(screen.getByLabelText('Film')).toBeInTheDocument()
     })
     const select = screen.getByLabelText('Film') as HTMLSelectElement
+    expect(within(select).getByText(/Duck and Cover/)).toBeInTheDocument()
     expect(within(select).getByText(/Letter V/)).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Open a file' })).toBeInTheDocument()
   })
@@ -76,9 +77,9 @@ describe('Movie Buddy', () => {
     expect(video).toBeInTheDocument()
     expect(document.querySelectorAll('video track')).toHaveLength(1)
 
-    seekTo(video, 22)
+    seekTo(video, 34)
     await waitFor(() => {
-      expect(screen.getByText(/Twist the first soft two inch bubble/i)).toBeInTheDocument()
+      expect(screen.getByText(/Bert the Turtle/i)).toBeInTheDocument()
     })
   })
 

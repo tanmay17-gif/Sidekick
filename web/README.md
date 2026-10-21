@@ -1,8 +1,17 @@
 # Sidekick web client
 
-The browser surface of Sidekick: voice in, decision engine out, real outcomes on
-screen, and a movie companion that reads the captions of the film you are
-actually watching. This package is owned by **Agent 3 (Product Experience)**.
+The browser surface of Sidekick. Two interfaces, one session:
+
+- **Interface A - Ask Sidekick / Movie Buddy.** The conversational surface you
+  talk to. A large companion that reflects what Sidekick is actually doing, a
+  readable transcript, and a movie companion that reads the captions of the
+  film you are watching.
+- **Interface B - Control room.** The developer view of the *same* session: the
+  live architecture diagram, the decision metadata for every request, the task
+  timeline fed by the real event stream, and the true status of every
+  capability.
+
+This package is owned by **Agent 3 (Product Experience)**.
 
 ```
 web/
@@ -12,9 +21,9 @@ web/
     lib/media/        subtitle parsing, cue lookup, the movie player state
     lib/movie/        the Movie Buddy brain and its control commands
     lib/games/        FEN rendering, local game rules
-    state/            the conversation state machine
+    state/            the shared session state machine
     components/       the interface
-  public/media/       the openly licensed film and its captions
+  public/media/       the openly licensed films and their captions
   dev/stub-server.mjs SIMULATED_TEST_ONLY development backend
   tests/unit/         unit + integration tests (Vitest)
   tests/e2e/          end-to-end tests (Playwright)
@@ -59,9 +68,12 @@ npm run test:e2e    # playwright (real browser, real HTTP, real media playback)
 node scripts/verify-real-backend.mjs http://127.0.0.1:4178 http://127.0.0.1:8040
 ```
 
-The script asserts that the capability strip reports the backend's own mode,
-that every published capability is shown, that a request is answered by the
-real engine with the tool it chose, and that nothing is faked in the client.
+Thirteen checks: the backend mode is reported verbatim, every published
+capability is shown, a request is answered by the real engine with the tool it
+chose, both interfaces show the same request and the same ids, the real model
+and confidence are displayed, the architecture diagram does not draw anything
+as live that the backend did not report, the bundled film really loads, and
+nothing threw.
 
 ## What is real and what is not
 
@@ -69,8 +81,9 @@ real engine with the tool it chose, and that nothing is faked in the client.
 |---|---|---|
 | Microphone input | **REAL** | Web Speech API (`SpeechRecognition`). Not Alexa+. |
 | Spoken responses | **REAL** | Web Speech Synthesis API, with a watchdog for engines that never start. |
-| Intent resolution | **REAL** (against the merged core) | Verified end to end; the request is answered by the real engine and the real note is written to disk. |
-| Decision trace | **REAL** | Every field comes from the backend response. |
+| Intent resolution | **REAL** (against the merged core) | Verified end to end: the request is answered by the real engine and a real note is written to disk. |
+| Interface A / Interface B | **REAL, one session** | Both read the same request list, session id and event stream. |
+| Architecture diagram | **REAL** | Every node's state comes from the backend's own capability report. |
 | Movie playback | **REAL** | A bundled public-domain film, played for real, with its own captions. |
 | Movie Buddy | **REAL, caption-based** | Reactions fire on real caption lines. There is **no visual analysis** and the interface says so. |
 | Coding job diff | **REAL, unverified end to end** | The client renders the real diff, changed files and test result. The execution service was not reachable from this environment. |
@@ -82,16 +95,16 @@ contract so the client can be built and tested before the real services exist,
 and it reports `mode: "stub"` so the interface labels it honestly instead of
 presenting it as live.
 
-See `docs/EXPERIENCE.md` for the full capability matrix and the browser
-limitations that matter for the demo.
+## The film
 
-## The movie
+The default film is **Duck and Cover** (1951) - a U.S. Federal Civil Defense
+Administration production, therefore **public domain**. A 2:30 clip is bundled
+with the app, with a caption track built from the archive's own transcription
+of the narration.
 
-The companion plays **Letter V** - a public-domain (CC0 1.0) short that is
-bundled with the app, with its own hand-authored English caption track. A
-second film, *Tears of Steel* (CC BY 3.0), is streamed from the Internet
-Archive. The exact copies, the rights evidence and the limits are in
-`docs/MOVIE_SOURCES.md`.
+Two more films are available: *Letter V* (CC0 1.0, bundled) and *Tears of
+Steel* (CC BY 3.0, streamed). The exact copies, the rights evidence and the
+limits are in `docs/MOVIE_SOURCES.md`.
 
 ## Configuration
 

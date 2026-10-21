@@ -21,15 +21,23 @@ export type Phase =
 
 export type ConnectionState = 'checking' | 'connected' | 'disconnected'
 
-export interface Turn {
-  id: string
-  role: 'user' | 'assistant'
-  inputSource: 'voice' | 'text'
+/**
+ * One request as the whole product sees it.
+ *
+ * Both surfaces read this list, so the conversation and the control room are
+ * always describing the same real work.
+ */
+export interface RequestRecord {
+  request_id: string
+  session_id: string
   utterance: string
-  response?: SidekickResponse
-  error?: { code: string; message: string; retryable: boolean; timeout: boolean }
+  input_source: 'voice' | 'text'
+  started_at: string
+  finished_at: string | null
+  status: 'in_flight' | 'answered' | 'failed'
+  response: SidekickResponse | null
   events: ProgressEvent[]
-  createdAt: string
+  error: { code: string; message: string; retryable: boolean; timeout: boolean } | null
 }
 
 export interface UseSidekickOptions {
@@ -52,24 +60,28 @@ export function looksLikeCorrection(text: string): boolean {
   return CORRECTION_MARKERS.some((marker) => marker.test(text))
 }
 
-/** The most recent assistant response contained in the turn list. */
-export function latestResponse(turns: Turn[]): SidekickResponse | null {
-  for (let index = turns.length - 1; index >= 0; index -= 1) {
-    const turn = turns[index]
-    if (turn?.role === 'assistant' && turn.response) return turn.response
-  }
+/** The action the control room should follow: the first one still moving. */
+export function liveActionOf(record: RequestRecord | null): string | null {
+  if (!record) return null
+  const running = record.response?.action_plan?.find(
+    (action) => action.state === 'running' || action.state === 'pending',
+  )
+  if (running) return running.job_id ?? running.action_id
   return null
 }
 
 export function useSidekick(options: UseSidekickOptions = {}) {
   const [sessionId, setSessionId] = useState(() => getOrCreateSessionId())
-  const [turns, setTurns] = useState<Turn[]>([])
+  const [requests, setRequests] = useState<RequestRecord[]>([])
   const [phase, setPhase] = useState<Phase>('idle')
   const [connection, setConnection] = useState<ConnectionState>('checking')
   const [capabilities, setCapabilities] = useState<CapabilitiesResponse | null>(null)
   const [capabilityError, setCapabilityError] = useState<string | null>(null)
-  const [liveEvents, setLiveEvents] = useState<ProgressEvent[]>([])
   const [speakEnabled, setSpeakEnabled] = useState(true)
+  /** Live events for the request that is currently in flight. */
+  const [liveEvents, setLiveEvents] = useState<ProgressEvent[]>([])
+  /** The action whose event stream the control room is following. */
+  const [followedAction, setFollowedAction] = useState<string | null>(null)
 
   const clientRef = useRef<SidekickClient | null>(null)
   if (clientRef.current === null) {
@@ -107,18 +119,23 @@ export function useSidekick(options: UseSidekickOptions = {}) {
   const send = useCallback(
     async (utterance: string, inputSource: 'voice' | 'text') => {
       const trimmed = utterance.trim()
-      if (!trimmed) return
+      if (!trimmed) return null
 
       const requestId = createId()
-      const userTurn: Turn = {
-        id: requestId,
-        role: 'user',
-        inputSource,
+      const startedAt = new Date().toISOString()
+      const record: RequestRecord = {
+        request_id: requestId,
+        session_id: sessionId,
         utterance: trimmed,
+        input_source: inputSource,
+        started_at: startedAt,
+        finished_at: null,
+        status: 'in_flight',
+        response: null,
         events: [],
-        createdAt: new Date().toISOString(),
+        error: null,
       }
-      setTurns((previous) => [...previous, userTurn])
+      setRequests((previous) => [...previous, record])
       setPhase('thinking')
       setLiveEvents([])
 
@@ -160,16 +177,19 @@ export function useSidekick(options: UseSidekickOptions = {}) {
         )
 
         lastResponseRef.current = response
-        const assistantTurn: Turn = {
-          id: response.request_id ?? requestId,
-          role: 'assistant',
-          inputSource,
-          utterance: trimmed,
-          response,
-          events,
-          createdAt: new Date().toISOString(),
-        }
-        setTurns((existing) => [...existing, assistantTurn])
+        setRequests((existing) =>
+          existing.map((entry) =>
+            entry.request_id === requestId
+              ? {
+                  ...entry,
+                  status: 'answered',
+                  response,
+                  events,
+                  finished_at: new Date().toISOString(),
+                }
+              : entry,
+          ),
+        )
         setPhase(
           response.status === 'awaiting_confirmation' ||
             response.status === 'needs_clarification'
@@ -190,16 +210,18 @@ export function useSidekick(options: UseSidekickOptions = {}) {
                 retryable: false,
                 timeout: false,
               }
-        const assistantTurn: Turn = {
-          id: requestId,
-          role: 'assistant',
-          inputSource,
-          utterance: trimmed,
-          error,
-          events: [],
-          createdAt: new Date().toISOString(),
-        }
-        setTurns((existing) => [...existing, assistantTurn])
+        setRequests((existing) =>
+          existing.map((entry) =>
+            entry.request_id === requestId
+              ? {
+                  ...entry,
+                  status: 'failed',
+                  error,
+                  finished_at: new Date().toISOString(),
+                }
+              : entry,
+          ),
+        )
         setPhase('error')
         if (error.code === 'network_unreachable' || error.code === 'timeout') {
           setConnection('disconnected')
@@ -227,33 +249,88 @@ export function useSidekick(options: UseSidekickOptions = {}) {
       sessionId: next,
       fetchImpl: options.fetchImpl,
     })
-    setTurns([])
+    setRequests([])
     setLiveEvents([])
     lastResponseRef.current = null
     void refreshCapabilities()
   }, [cancel, options.baseUrl, options.fetchImpl, refreshCapabilities])
 
-  const pendingAction = useMemo(() => {
-    const response = latestResponse(turns)
-    if (!response) return null
-    return (
-      response.action_plan.find((action) =>
-        ['pending', 'awaiting_confirmation', 'running', 'paused'].includes(action.state),
-      ) ?? null
-    )
-  }, [turns])
+  /* ---------------------------------------------------------------- *
+   * The control room follows the real event stream of the running
+   * action. It resumes with ?after=<seq> so a reconnect never
+   * duplicates an event and never invents one.
+   * ---------------------------------------------------------------- */
+  const latest = requests[requests.length - 1] ?? null
+  const actionToFollow = liveActionOf(latest)
+
+  useEffect(() => {
+    if (!actionToFollow) {
+      setFollowedAction(null)
+      return
+    }
+    setFollowedAction(actionToFollow)
+
+    let cancelled = false
+    let controller: AbortController | null = null
+    let lastSeq = 0
+    let attempt = 0
+
+    const run = async () => {
+      while (!cancelled) {
+        controller = new AbortController()
+        try {
+          const events = await client.actionEvents(
+            actionToFollow,
+            lastSeq > 0 ? lastSeq : null,
+            {
+              onEvent: (event) => {
+                if (cancelled) return
+                if (typeof event.seq === 'number') {
+                  if (event.seq <= lastSeq) return // never duplicate
+                  lastSeq = event.seq
+                }
+                setLiveEvents((existing) => [...existing, event])
+              },
+            },
+            controller.signal,
+          )
+          if (events.length > 0) {
+            attempt = 0
+          }
+          // A finished stream stays open for the next request to follow.
+          break
+        } catch {
+          attempt += 1
+          if (cancelled || attempt > 3) break
+          await new Promise((resolve) => setTimeout(resolve, 800 * attempt))
+        }
+      }
+    }
+
+    void run()
+    return () => {
+      cancelled = true
+      controller?.abort()
+    }
+  }, [actionToFollow, client, requests.length])
+
+  const liveRequest = useMemo(
+    () => requests[requests.length - 1] ?? null,
+    [requests],
+  )
 
   return {
     sessionId,
-    turns,
+    requests,
+    liveRequest,
+    liveEvents,
+    followedAction,
     phase,
     connection,
     capabilities,
     capabilityError,
-    liveEvents,
     speakEnabled,
     setSpeakEnabled,
-    pendingAction,
     send,
     cancel,
     resetSession,

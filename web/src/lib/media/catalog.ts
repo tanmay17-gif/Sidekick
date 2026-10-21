@@ -4,8 +4,18 @@ import { parseSubtitles } from './subtitles'
 /**
  * The media the movie companion can play.
  *
- * Both films are openly licensed and both ship their caption track with the
- * app, so the companion has real, verifiable cue timings.
+ * All three are openly licensed and all three ship their caption track with
+ * the app, so the companion has real, verifiable cue timings.
+ *
+ * `duck-and-cover` (the default)
+ *   "Duck and Cover" (1951), a US Federal Civil Defense Administration film
+ *   produced by Archer Productions, in the Prelinger Archives on the Internet
+ *   Archive (item `DuckandC1951`). Public domain: a work of the United States
+ *   government, and selected for the National Film Registry.
+ *   The bundled copy is a 2:30 clip (source 00:00:32 - 00:03:02) showing Bert
+ *   the Turtle, the atomic flash and the "duck and cover" lesson, with a
+ *   caption track built from the archive's own automatic transcription of the
+ *   narration. See docs/MOVIE_SOURCES.md.
  *
  * `letter-v`
  *   "Letter V" - Internet Archive item `LetterV`.
@@ -14,27 +24,52 @@ import { parseSubtitles } from './subtitles'
  *   www.fewdoit.com" and describes it as a "balloon twisting de vA-deo
  *   instruction ... public domain dedication".
  *   Runtime 2:29, with a hand-authored English caption track that covers the
- *   whole film. Bundled in the app (15.6 MB) so the demo never depends on a
- *   third-party host being up.
+ *   whole film. Bundled in the app.
  *
  * `tears-of-steel`
  *   "Tears of Steel" (2012), Blender Foundation / MPEG, CC BY 3.0.
  *   Streamed from the Internet Archive derivative (faststart H.264, HTTP
  *   range support). The official English subtitle file is bundled.
- *
- * See docs/MOVIE_SOURCES.md for the full rights evidence and the limitations.
  */
 
 export const DEFAULT_MEDIA: MediaAsset = {
+  id: 'duck-and-cover',
+  title: 'Duck and Cover',
+  credit:
+    'Duck and Cover (1951) - U.S. Federal Civil Defense Administration, produced by Archer Productions; public domain, Prelinger Archives on the Internet Archive',
+  license: 'Public domain',
+  src: `${import.meta.env.BASE_URL}media/duck-and-cover/duck-and-cover.mp4`,
+  mime_type: 'video/mp4',
+  // The WebM (VP9 + Opus) is the same clip, transcoded for browsers without
+  // H.264 - notably the Chromium build that ships with Playwright. The browser
+  // picks whichever it can decode.
+  sources: [
+    {
+      src: `${import.meta.env.BASE_URL}media/duck-and-cover/duck-and-cover.mp4`,
+      mime_type: 'video/mp4',
+      label: 'MP4 (H.264)',
+    },
+    {
+      src: `${import.meta.env.BASE_URL}media/duck-and-cover/duck-and-cover.webm`,
+      mime_type: 'video/webm',
+      label: 'WebM (VP9)',
+    },
+  ],
+  subtitle_src: `${import.meta.env.BASE_URL}media/duck-and-cover/duck-and-cover.srt`,
+  subtitle_label: 'English captions of the narration',
+  aspect_ratio: '4 / 3',
+  cues: [],
+  companion_rules: [],
+  bundled: true,
+}
+
+export const ALTERNATE_MEDIA: MediaAsset = {
   id: 'letter-v',
   title: 'Letter V',
   credit: 'Letter V - public domain dedication (CC0 1.0), Internet Archive item LetterV',
   license: 'CC0 1.0',
   src: `${import.meta.env.BASE_URL}media/letter-v/letter-v.mp4`,
   mime_type: 'video/mp4',
-  // The WebM (VP9 + Opus) is the same film, transcoded for browsers without
-  // H.264 - notably the Chromium build that ships with Playwright. The browser
-  // picks whichever it can decode.
   sources: [
     {
       src: `${import.meta.env.BASE_URL}media/letter-v/letter-v.mp4`,
@@ -49,26 +84,35 @@ export const DEFAULT_MEDIA: MediaAsset = {
   ],
   subtitle_src: `${import.meta.env.BASE_URL}media/letter-v/letter-v.srt`,
   subtitle_label: 'hand-authored English captions',
+  aspect_ratio: '4 / 3',
   cues: [],
   companion_rules: [],
   bundled: true,
 }
 
-export const ALTERNATE_MEDIA: MediaAsset = {
+export const STREAMED_MEDIA: MediaAsset = {
   id: 'tears-of-steel',
   title: 'Tears of Steel',
   credit: 'Tears of Steel - Blender Foundation / MPEG (CC BY 3.0)',
   license: 'CC BY 3.0',
   src: 'https://archive.org/download/Tears-of-Steel/tears_of_steel_720p.mp4',
   mime_type: 'video/mp4',
+  sources: [
+    {
+      src: 'https://archive.org/download/Tears-of-Steel/tears_of_steel_720p.mp4',
+      mime_type: 'video/mp4',
+      label: 'MP4 (H.264)',
+    },
+  ],
   subtitle_src: `${import.meta.env.BASE_URL}media/tears-of-steel/TOS-en.srt`,
   subtitle_label: 'official English subtitles',
+  aspect_ratio: '16 / 9',
   cues: [],
   companion_rules: [],
   bundled: false,
 }
 
-export const MEDIA_LIBRARY: MediaAsset[] = [DEFAULT_MEDIA, ALTERNATE_MEDIA]
+export const MEDIA_LIBRARY: MediaAsset[] = [DEFAULT_MEDIA, ALTERNATE_MEDIA, STREAMED_MEDIA]
 
 export interface LoadCatalogResult {
   asset: MediaAsset

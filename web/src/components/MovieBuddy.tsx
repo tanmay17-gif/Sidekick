@@ -55,6 +55,15 @@ export function MovieBuddy({
 
   const buddy = useMovieBuddy({ asset, speaker, speechEnabled, onSay })
 
+  // The native caption track stays attached for assistive technology and the
+  // player's own caption menu, but hidden so it does not double up with the
+  // app's styled captions.
+  const trackElementRef = useRef<HTMLTrackElement | null>(null)
+  useEffect(() => {
+    const track = trackElementRef.current
+    if (track?.track && track.track.mode !== 'hidden') track.track.mode = 'hidden'
+  }, [buddy.trackUrl, asset?.id])
+
   // Register the controller so the talk surface can drive this one.
   useEffect(() => {
     const controller: BuddyController = {
@@ -134,6 +143,7 @@ export function MovieBuddy({
     )
   }
 
+
   const companionState =
     buddy.buddy.mode === 'off'
       ? 'off'
@@ -195,7 +205,7 @@ export function MovieBuddy({
 
       <div className="buddy__grid">
         <div className="buddy__stage">
-          <div className="stage" data-buffering={buddy.player.buffering || undefined}>
+          <div className="stage" style={{ aspectRatio: buddy.stageAspect }} data-buffering={buddy.player.buffering || undefined}>
             <video
               ref={buddy.videoRef}
               controls
@@ -217,6 +227,10 @@ export function MovieBuddy({
               )}
               {buddy.trackUrl ? (
                 <track
+                  ref={(element) => {
+                    trackElementRef.current = element
+                    if (element?.track && element.track.mode !== 'hidden') element.track.mode = 'hidden'
+                  }}
                   kind="subtitles"
                   src={buddy.trackUrl}
                   srcLang="en"

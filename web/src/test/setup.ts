@@ -46,3 +46,10 @@ if (!('URL.createObjectURL' in URL)) {
     value: vi.fn(),
   })
 }
+
+// jsdom does not implement scrolling.
+if (typeof Element !== 'undefined' && !Element.prototype.scrollTo) {
+  Element.prototype.scrollTo = function scrollTo() {
+    /* no-op in jsdom */
+  }
+}

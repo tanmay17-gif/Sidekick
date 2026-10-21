@@ -4,6 +4,7 @@ import { App } from './App'
 import './styles/tokens.css'
 import './styles/base.css'
 import './styles/components.css'
+import './styles/interfaces.css'
 
 const container = document.getElementById('root')
 if (!container) {

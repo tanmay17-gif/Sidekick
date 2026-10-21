@@ -1742,8 +1742,8 @@
 .stage__overlay {
   position: absolute;
   inset: auto 0 0 0;
-  padding: var(--space-8) var(--space-5) var(--space-3);
-  background: linear-gradient(180deg, transparent, rgba(20, 17, 13, 0.86));
+  padding: var(--space-10) var(--space-5) var(--space-10);
+  background: linear-gradient(180deg, transparent, rgba(20, 17, 13, 0.88) 38%);
   text-align: center;
   pointer-events: none;
   font-size: var(--text-lg);

@@ -53,6 +53,8 @@ export interface UseMovieBuddyResult {
   activeCueIndex: number
   activeCueText: string
   trackUrl: string | null
+  /** The aspect ratio the stage should use for this film. */
+  stageAspect: string
   /** Speak a line now, honouring the budget, the cooldown and the captions. */
   trySpeak: (text: string) => void
   activate: () => void
@@ -363,6 +365,7 @@ export function useMovieBuddy(options: UseMovieBuddyOptions): UseMovieBuddyResul
     }
   }, [trackUrl])
 
+
   const quietRemainingMs = Math.max(0, quietUntil - now)
 
   return {
@@ -400,5 +403,6 @@ export function useMovieBuddy(options: UseMovieBuddyOptions): UseMovieBuddyResul
     handlePlaying,
     handleEnded,
     lastGate,
+    stageAspect: asset?.aspect_ratio ?? '16 / 9',
   }
 }

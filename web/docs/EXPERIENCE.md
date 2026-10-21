@@ -13,7 +13,8 @@ defined in `.sidekick/TEAM_PLAYBOOK.md` §8.
 | Request / response contract | `REAL_AND_VERIFIED` | `web/src/lib/api/client.ts` implements `.sidekick/API_CONTRACTS.md` v1. Session id is sent in both the `x-sidekick-session-id` header and the body field. |
 | Backend error surfacing | `REAL_AND_VERIFIED` | Transport failure, timeout, HTTP error and contract violation are all distinct, tested states. |
 | Decision trace | `REAL_AND_VERIFIED` | Every step renders a field the backend actually sent; where the backend reports no reason, the trace says so. Unit tested plus an end-to-end check that the raw payload is inspectable. |
-| Movie playback | `REAL_AND_VERIFIED` | The bundled *Letter V* really plays; the E2E suite waits for `readyState >= 1`, asserts a real duration and plays it. |
+| Two interfaces, one session | `REAL_AND_VERIFIED` | Interface A and Interface B read the same request list, session id and event stream. Verified end to end in a real browser. |
+| Movie playback | `REAL_AND_VERIFIED` | The bundled *Duck and Cover* clip really plays; the E2E suite waits for `readyState >= 1`, asserts a real duration and plays it. |
 | Subtitle synchronisation | `REAL_AND_VERIFIED` | Cue lookup is a pure function over `video.currentTime`; the E2E suite plays the film and asserts the caption shown matches the real playback position. |
 | Movie Buddy reactions | `REAL_AND_VERIFIED` (caption-based) | Each reaction fires on a real caption line that satisfies a real rule. The trigger is recorded and shown in "Why did Sidekick react?". |
 | Intent resolution / decision engine | `REAL_AND_VERIFIED` against the real backend | Verified on 2026-10-21 against the merged core (`main` @ `fcd2427`): the client showed `backend LIVE`, the real tool inventory, the streamed progress events and the action the real engine chose. Re-run with `node scripts/verify-real-backend.mjs`. |

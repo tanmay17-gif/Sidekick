@@ -312,6 +312,8 @@ export interface MediaAsset {
   companion_rules: CompanionRule[]
   /** True when the media file ships with the app. */
   bundled?: boolean
+  /** The shape of the picture, so the player does not pillarbox the film. */
+  aspect_ratio?: string
   duration_hint_seconds?: number
 }
 
