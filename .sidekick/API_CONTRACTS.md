@@ -324,6 +324,7 @@ browser client uses by default) and `/v1/...` (shorter aliases).
 | `GET` | `/api/v1/capabilities` (alias `/v1/capabilities`) | capability inventory |
 | `GET` | `/api/v1/media/catalog` | media assets (the core ships none; the browser falls back to the bundled film) |
 | `GET` | `/api/v1/actions/{action_id}` | one action and its events |
+| `GET` | `/api/v1/actions/{action_id}/events` | SSE stream of the action's events |
 | `POST` | `/api/v1/actions/{action_id}/approve` (alias `/confirm`) | approve or refuse a pending action |
 | `POST` | `/api/v1/actions/{action_id}/cancel` | cancel one pending or running action |
 | `GET` | `/v1/sessions/{session_id}` | session state, tasks, actions |
@@ -334,6 +335,19 @@ browser client uses by default) and `/v1/...` (shorter aliases).
 
 A confirmation binds to the exact action: send the `plan_hash` you received and the API rejects the
 confirmation with `409 conflict` when the plan changed in the meantime.
+
+### Live action events
+
+`GET /api/v1/actions/{action_id}/events` is a `text/event-stream`. It emits one `data: {event}`
+frame per event of that action, as the events happen - which is how a long running action (a timer,
+a coding job) reports its completion to a voice client.
+
+- `?after=<seq>` resumes the stream after a disconnect. Every later event is delivered, with no
+  duplicates and no gaps, exactly like the execution service's stream.
+- `?timeout=<seconds>` bounds how long the stream stays open (default 30 s). The stream also ends
+  when the action reaches a terminal state.
+- The last frame is always `data: {"action": {...}, "seq": <n>}` with the final action state, so a
+  client that reconnects late still learns the outcome.
 
 ## Required examples
 

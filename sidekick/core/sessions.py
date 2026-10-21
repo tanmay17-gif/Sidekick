@@ -81,6 +81,9 @@ class SessionState:
     transcript: list[TurnRecord] = field(default_factory=list)
     #: Bounded log of events, including events emitted by background work.
     events: list[Event] = field(default_factory=list)
+    #: Signalled whenever a new event is logged, so a streaming client can
+    #: wait for it instead of polling.
+    event_signal: threading.Condition = field(default_factory=threading.Condition)
 
     # -- action helpers ---------------------------------------------------
 
@@ -154,12 +157,40 @@ class SessionState:
         """Append an event to the session log (bounded).
 
         The sequence number is assigned here so that it is monotonic per
-        session, including for events produced by background work.
+        session, including for events produced by background work. Waiters
+        are woken up so a streaming client sees the event immediately.
         """
-        event.seq = len(self.events) + 1
-        self.events.append(event)
-        if len(self.events) > 200:
-            del self.events[:-200]
+        with self.event_signal:
+            event.seq = len(self.events) + 1
+            self.events.append(event)
+            if len(self.events) > 200:
+                del self.events[:-200]
+            self.event_signal.notify_all()
+
+    def events_after(self, seq: int = 0, action_id: str | None = None) -> list[Event]:
+        """The events logged after ``seq`` (optionally only for one action)."""
+        with self.event_signal:
+            events = [event for event in self.events if event.seq > seq]
+        if action_id is not None:
+            events = [event for event in events if event.action_id == action_id]
+        return events
+
+    def wait_for_events(
+        self,
+        seq: int = 0,
+        action_id: str | None = None,
+        timeout: float = 1.0,
+    ) -> list[Event]:
+        """Wait until at least one new event exists, then return the new ones."""
+        with self.event_signal:
+            self.event_signal.wait_for(
+                lambda: any(event.seq > seq for event in self.events),
+                timeout=timeout,
+            )
+            events = [event for event in self.events if event.seq > seq]
+        if action_id is not None:
+            events = [event for event in events if event.action_id == action_id]
+        return events
 
     def touch(self) -> None:
         self.updated_at = utcnow()
@@ -235,3 +266,12 @@ class SessionStore:
     def session_ids(self) -> list[str]:
         with self._lock:
             return list(self._sessions.keys())
+
+    def find_action(self, action_id: str) -> tuple[SessionState, Action] | None:
+        """Locate an action in any session."""
+        with self._lock:
+            for state in self._sessions.values():
+                action = state.get_action(action_id)
+                if action is not None:
+                    return state, action
+        return None

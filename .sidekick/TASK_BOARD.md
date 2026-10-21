@@ -18,9 +18,10 @@ A task is not `MERGED` until the real merge commit exists on the remote base. A 
 | ID | Phase | Task | Owner | Status | Depends on | Acceptance criteria |
 |---|---|---|---|---|---|---|
 | A1-BOOT | 0 | Repository audit + team protocol / bootstrap PR | Agent 1 | MERGED | — | `.sidekick/` coordination files created and present on `main` (commit `1b80a0d`). *Note: pushed directly to `main` before the PR-only rule could be applied - no PR exists for it.* |
-| A1-CONTRACT | 1 | Document + implement minimal request/action contract + first vertical slice | Agent 1 | IN_REVIEW | A1-BOOT | Contract schemas v1 implemented in `sidekick/core/schemas.py`; HTTP surface in `sidekick/api/app.py`; real vertical slice (`POST /v1/decide` → real local adapter → UI page); automated tests; PR open |
+| A1-CONTRACT | 1 | Document + implement minimal request/action contract + first vertical slice | Agent 1 | IN_REVIEW | A1-BOOT | Contract schemas v1 implemented in `sidekick/core/schemas.py`; HTTP surface in `sidekick/api/app.py`; real vertical slice (`POST /v1/decide` → real local adapter → UI page); automated tests; PR #7 open |
 | A1-BRAIN | 2 | Intent / session / correction / orchestration behind contracts | Agent 1 | IN_REVIEW | A1-CONTRACT | Correction (pre-exec + in-flight), multi-action, session isolation, safety policy, model/fallback observability - implemented and tested in the A1-CONTRACT PR; needs review + merge to become MERGED |
 | A1-MODEL | 2 | Real decision model integration + honest provenance | Agent 1 | IN_REVIEW | A1-CONTRACT | `convaiinnovations/laya` wired in with lazy load, timeout, invalid-output handling and observable fallback; measured with `scripts/eval_laya.py` |
+| A1-COMPAT | 2 | Cross-agent contract verification + live action event streaming | Agent 1 | IN_REVIEW | A1-CONTRACT | `scripts/check_contract_compat.py` verifies the core against the *actual* contract files on the Agent 2 and Agent 3 branches; the same expectations are frozen in `tests/test_contract_compat.py` for CI. `GET /api/v1/actions/{id}/events` streams an action's events live and is resumable with `?after=`. PR #9 open |
 | A2-AUDIT | 0 | Read-only execution/integration prerequisites inventory | Agent 2 | READY | — | Inventory of runtime/tool/adapter prerequisites |
 | A3-AUDIT | 0 | Read-only UI/voice/media prerequisites inventory | Agent 3 | READY | — | Inventory of voice/UI/media prerequisites |
 | A4-RULES | 0 | Verify current official hackathon rules; start test/CI plan | Agent 4 | READY | — | Source URLs, date checked, requirement text saved in repo |
@@ -37,10 +38,14 @@ exist). After that: A1-BRAIN hardening - the remaining gaps are listed under "Op
 
 - The confirmation flow is exposed over HTTP but the *voice* confirmation ("yes", "no") is currently
   only reachable as a control verb in the utterance; Agent 3 should send the explicit
-  `POST /v1/actions/{id}/confirm` call so the binding to the exact action is guaranteed.
-- Session state is in-memory only; a restart loses the conversation. Documented as a Phase 1 limit.
+  `POST /v1/actions/{id}/approve` call so the binding to the exact action is guaranteed.
+- Session state is in-memory only; a restart loses the conversation. Within a running process the
+  reconnect story is solid (`?after=<seq>` resumes an event stream without gaps). Documented as a
+  Phase 1 limit.
 - The rule fallback is catalog driven and reliable, but it cannot resolve capabilities that have no
   alias in the catalog; every capability must therefore declare its aliases.
+- `media.play` and `game.start` are deliberately **not** declared yet: until Agent 3 provides the
+  adapters they would be offered and then fail. Declare them when the adapter exists.
 
 ## Remote state (observed 2026-10-21)
 

@@ -53,13 +53,20 @@ Agent 3 owns the real experience).
 Run the tests:
 
 ```bash
-python -m pytest            # 80+ tests, no network and no model weights needed
+python -m pytest            # 99 tests, no network and no model weights needed
+```
+
+Check that the core and the other agents still agree on the contract:
+
+```bash
+git fetch origin --prune
+python scripts/check_contract_compat.py
 ```
 
 Evaluate the real model (downloads ~800 MB of weights on first run):
 
 ```bash
-python scripts/eval_laya.py --checkpoint english --json reports/laya-english.json
+python scripts/eval_laya.py --checkpoint typed-decisions --json reports/laya-typed-decisions.json
 ```
 
 ---
@@ -166,6 +173,7 @@ Full schema: `.sidekick/API_CONTRACTS.md`.
 | `POST` | `/api/v1/requests` | one user turn -> intent, action plan, events |
 | `GET` | `/api/v1/capabilities` | the truthful capability inventory |
 | `GET` | `/api/v1/actions/{id}` | one action and its events |
+| `GET` | `/api/v1/actions/{id}/events` | SSE stream of an action's events (resumable with `?after=`) |
 | `POST` | `/api/v1/actions/{id}/approve` | approve or refuse a pending action |
 | `POST` | `/api/v1/actions/{id}/cancel` | cancel one pending or running action |
 | `GET` | `/v1/sessions/{session_id}` | session state, tasks, actions |

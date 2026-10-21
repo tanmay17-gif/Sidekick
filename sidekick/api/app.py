@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import json
 import os
+import time
 from pathlib import Path
 from typing import Any
 
@@ -262,6 +263,30 @@ def create_app(engine: DecisionEngine | None = None) -> FastAPI:
             ],
         }
 
+    @app.get("/api/v1/actions/{action_id}/events")
+    @app.get("/v1/actions/{action_id}/events")
+    async def action_events(
+        action_id: str,
+        session_id: str | None = None,
+        after: int = 0,
+        timeout: float = 30.0,
+    ) -> Any:
+        """Stream the events of one action as they happen.
+
+        The stream is resumable: ``?after=<seq>`` continues after a
+        disconnect without gaps and without duplicates. It ends when the
+        action reaches a terminal state or when the timeout expires.
+        """
+        found = _find_action(engine, action_id, session_id)
+        if found is None:
+            raise HTTPException(status_code=404, detail="unknown action")
+        _action, session = found
+        return StreamingResponse(
+            _event_stream_for_action(engine, session.session_id, action_id, after, timeout),
+            media_type="text/event-stream",
+            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+        )
+
     @app.post("/api/v1/actions/{action_id}/approve")
     @app.post("/api/v1/actions/{action_id}/confirm")
     @app.post("/v1/actions/{action_id}/confirm")
@@ -334,6 +359,42 @@ def _find_action(
         if action is not None:
             return action, session
     return None
+
+
+def _event_stream_for_action(
+    engine: DecisionEngine,
+    session_id: str,
+    action_id: str,
+    after: int,
+    timeout: float,
+):
+    """Yield the events of one action as they are produced."""
+    from ..core.schemas import ActionStatus
+
+    terminal = {
+        ActionStatus.SUCCEEDED,
+        ActionStatus.FAILED,
+        ActionStatus.CANCELLED,
+        ActionStatus.SUPERSEDED,
+    }
+    seq = after
+    deadline = time.monotonic() + max(0.0, timeout)
+    while True:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            break
+        events = engine.wait_for_action_events(
+            session_id, action_id, seq, timeout=min(1.0, remaining)
+        )
+        for event in events:
+            seq = event.seq
+            yield f"data: {json.dumps(event.serialise())}\n\n"
+        action = engine.get_action(session_id, action_id)
+        if action is None or action.state in terminal:
+            break
+    action = engine.get_action(session_id, action_id)
+    if action is not None:
+        yield f"data: {json.dumps({'action': action.model_dump(mode='json'), 'seq': seq})}\n\n"
 
 
 def _apply_session_override(payload: SidekickRequest, header_value: str | None) -> SidekickRequest:
