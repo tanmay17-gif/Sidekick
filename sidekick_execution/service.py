@@ -22,6 +22,7 @@ from typing import Any, Dict, List, Optional
 
 from .adapters.coding import CodingActionRequest, CodingAdapter
 from .adapters import system as system_adapter
+from .adapters import web as web_adapter
 from .adapters.registry import (
     RISK_HIGH,
     RISK_LOW,
@@ -57,6 +58,7 @@ TOOL_SYSTEM_VOLUME = "system.volume"
 TOOL_SYSTEM_MEDIA_CONTROL = "system.media_control"
 TOOL_SYSTEM_CLIPBOARD = "system.clipboard"
 TOOL_SYSTEM_OPEN = "system.open"
+TOOL_WEB_FETCH = "web.fetch"
 
 
 @dataclass
@@ -325,6 +327,27 @@ class ExecutionService:
                 status=STATUS_REAL,
             )
         )
+        self.registry.register(
+            ToolSpec(
+                name=TOOL_WEB_FETCH,
+                description=(
+                    "Perform a real HTTP(S) request and return what the server actually "
+                    "returned. Only http and https URLs are accepted."
+                ),
+                handler=self._handle_web_fetch,
+                arguments_schema={
+                    "type": "object",
+                    "required": ["url"],
+                    "properties": {
+                        "url": {"type": "string"},
+                        "timeout_seconds": {"type": "number"},
+                        "max_bytes": {"type": "integer"},
+                    },
+                },
+                risk_level=RISK_LOW,
+                status=STATUS_REAL,
+            )
+        )
 
     @staticmethod
     def _coding_status(status: ProviderStatus) -> tuple:
@@ -437,6 +460,14 @@ class ExecutionService:
             "system_capabilities": system_adapter.capabilities(),
             "sandbox_model": "process-level (allowlist, timeout, bounded output, workspace containment)",
         }
+
+    def _handle_web_fetch(self, arguments: Dict[str, Any], ctx: ToolContext) -> Dict[str, Any]:
+        url = arguments.get("url")
+        if not isinstance(url, str) or not url.strip():
+            raise SidekickError("invalid_request", "A 'url' is required.")
+        timeout = float(arguments.get("timeout_seconds", 20.0))
+        max_bytes = int(arguments.get("max_bytes", 512 * 1024))
+        return web_adapter.fetch(url, timeout=timeout, max_bytes=max_bytes)
 
     # -- real local system capabilities -------------------------------------
     def _handle_system_volume(self, arguments: Dict[str, Any], ctx: ToolContext) -> Dict[str, Any]:

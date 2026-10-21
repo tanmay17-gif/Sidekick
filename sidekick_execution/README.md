@@ -14,6 +14,7 @@ Owned by **Agent 2 (Real Execution & Integrations)**.
 | **Provider** | decides *what* to change: an OpenAI-compatible HTTP API, an authorized local coding CLI, or an explicitly-labelled simulated substitute | **REAL** when a credential or CLI is configured; **SIMULATED** for the dev substitute |
 | **Adapters** | MCP tool surface and HTTP/SSE API over the same tools, with a truthful capability report | **REAL** |
 | **Local system adapters** | real Windows APIs via `ctypes`: system volume, multimedia key presses, clipboard, open-with-default-handler, real `git commit` | **REAL** |
+| **Web lookup** | a real HTTP(S) request, with scheme allowlist, credential refusal, size cap and timeout | **REAL** |
 
 Nothing here fabricates a diff, a test result, or a provider answer. A
 provider that is not configured produces a `provider_not_configured` error

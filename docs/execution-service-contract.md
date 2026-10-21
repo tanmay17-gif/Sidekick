@@ -331,6 +331,7 @@ status is `NOT_CONFIGURED` must not be offered as a working button.
 | `system.media_control` | `REAL` on Windows, else `NOT_CONFIGURED` | no | low |
 | `system.clipboard` | `REAL` on Windows, else `NOT_CONFIGURED` | no | medium |
 | `system.open` | `REAL` on Windows, else `NOT_CONFIGURED` | no | medium |
+| `web.fetch` | `REAL` | no | low |
 
 `coding.execute` arguments:
 
@@ -365,6 +366,39 @@ tool call returns `not_implemented` — they never pretend to work.
 
 `system.info` reports which of these are actually usable on the machine, so
 the UI can reflect reality.
+
+### 7.2 Real web lookups
+
+`web.fetch` performs a **real** HTTP(S) request and returns what the server
+actually returned:
+
+```json
+{
+  "url": "https://example.com/page",
+  "status": 200,
+  "ok": true,
+  "headers": { "content-type": "text/html; charset=utf-8" },
+  "body": "...",
+  "bytes": 4096,
+  "truncated": false,
+  "content_type": "text/html; charset=utf-8"
+}
+```
+
+Safety rules:
+
+* only `http` and `https` are accepted — `file:`, `ftp:` and `data:` are
+  refused, so the tool cannot be used to read local files;
+* URLs carrying credentials are refused, and any URL that reaches an error
+  payload has its userinfo stripped, so a password is never echoed back;
+* the body is capped (`max_bytes`, default 512 KiB) and truncation is
+  reported;
+* a hard timeout applies to the connection and the read;
+* an HTTP error status is reported as a **result** (`status`, `ok: false`,
+  `error.code: "http_error"`), not as a silent empty success.
+
+This needs no provider account, so it is `REAL`. It is the capability behind
+"look this up for me" voice requests.
 
 ## 8. MCP surface
 
