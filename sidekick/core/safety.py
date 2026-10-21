@@ -40,6 +40,13 @@ from .catalog import (
 )
 from .schemas import RiskLevel
 
+#: The argument names that name a *location* rather than a file the core
+#: writes. They are outside the core's containment check, because the tool
+#: that declares one owns that area and is responsible for authorising it.
+_LOCATION_ARGUMENTS = frozenset(
+    {"workspace", "path", "directory", "project", "repo", "root", "folder"}
+)
+
 _RISK_ORDER = {
     RiskLevel.LOW: 0,
     RiskLevel.MEDIUM: 1,
@@ -260,6 +267,13 @@ class SafetyPolicy:
                     message=f"'{arg.name}' must be text",
                     argument=arg.name,
                 )
+            if arg.name in _LOCATION_ARGUMENTS or set(arg.aliases) & _LOCATION_ARGUMENTS:
+                # A location argument names the area the *tool* works in (a
+                # project directory). The core does not own that area and
+                # must not pretend to: the adapter is responsible for
+                # authorising it, and the execution service enforces its own
+                # allowed roots.
+                return None
             unsafe = self._check_containment(value)
             if unsafe is not None:
                 return PolicyViolation(

@@ -152,8 +152,18 @@ def create_app(engine: DecisionEngine | None = None) -> FastAPI:
                 # The client side has its own list; a server tool report
                 # would either claim it works or claim it does not exist.
                 continue
-            state = by_id.get(spec.name, {}).get("state", "unavailable")
-            status = "REAL" if state == "live" else "NOT_IMPLEMENTED"
+            # An adapter may describe itself more precisely than "there is
+            # an adapter" (the execution service reports whether a *real*
+            # coding provider is behind it), so the browser never sees
+            # "live" for a capability that would fail.
+            reported = _adapter_status(engine, spec.name)
+            default_status = (
+                "REAL" if engine.registry.is_available(spec.name) else "NOT_IMPLEMENTED"
+            )
+            status = str(reported.get("status") or default_status)
+            detail = str(reported.get("detail") or by_id.get(spec.name, {}).get("detail", ""))
+            simulated = status == "SIMULATED"
+            state = _STATE_BY_STATUS.get(status, by_id.get(spec.name, {}).get("state", "unavailable"))
             status_counts[status] = status_counts.get(status, 0) + 1
             tool_items.append(
                 {
@@ -163,22 +173,26 @@ def create_app(engine: DecisionEngine | None = None) -> FastAPI:
                     "approval_required": spec.requires_approval,
                     "risk_level": spec.risk.value,
                     "status": status,
-                    "status_detail": by_id.get(spec.name, {}).get("detail", ""),
-                    "simulated": False,
+                    "status_detail": detail,
+                    "simulated": simulated,
                     "execution_target": spec.execution_target,
                     "owner": spec.owner,
                 }
             )
+            # The browser renders the state vocabulary it already knows.
+            if spec.name in by_id:
+                by_id[spec.name]["state"] = state
+                by_id[spec.name]["detail"] = detail
 
         return {
             "contract_version": CONTRACT_VERSION,
             "mode": "live",
-            "capabilities": server,
+            "capabilities": list(by_id.values()),
             "client_capabilities": client,
             "tools": tool_items,
             "tool_count": len(tool_items),
             "status_counts": status_counts,
-            "any_simulated": False,
+            "any_simulated": any(item["simulated"] for item in tool_items),
             "games": [],
             "providers": [],
         }
@@ -401,6 +415,38 @@ def create_app(engine: DecisionEngine | None = None) -> FastAPI:
         return FileResponse(str(client_index))
 
     return app
+
+
+#: The execution status vocabulary, mapped onto the states the browser
+#: already renders (``live | simulated | unavailable | unconfigured |
+#: disconnected``).
+_STATE_BY_STATUS = {
+    "REAL": "live",
+    "SIMULATED": "simulated",
+    "NOT_CONFIGURED": "unconfigured",
+    "NOT_IMPLEMENTED": "unavailable",
+    "UNAVAILABLE": "unavailable",
+}
+
+
+def _adapter_status(engine: DecisionEngine, tool: str) -> dict[str, Any]:
+    """What an adapter says about itself, when it says anything.
+
+    An adapter may implement ``capability_status()`` and report e.g.
+    ``{"status": "NOT_CONFIGURED", "detail": "..."}``. The report is never
+    allowed to break the capability inventory.
+    """
+    adapter = engine.registry.get(tool)
+    if adapter is None:
+        return {}
+    describe = getattr(adapter, "capability_status", None)
+    if not callable(describe):
+        return {}
+    try:
+        reported = describe()
+    except Exception:  # noqa: BLE001 - never break the report
+        return {}
+    return reported if isinstance(reported, dict) else {}
 
 
 def _find_action(

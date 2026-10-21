@@ -24,6 +24,7 @@ Order of operations (this order *is* the product behaviour):
 
 from __future__ import annotations
 
+import os
 import re
 import threading
 import time
@@ -65,6 +66,7 @@ from .parsing import (
     extract_argument_hints,
     extract_remainder,
     find_when_expression,
+    parse_quoted_text,
     is_capability_question,
     is_resume_request,
     match_control,
@@ -103,6 +105,16 @@ CLIENT_ACTION_TIMEOUT_SECONDS = 120.0
 
 #: How often the background sweep looks for expired client actions.
 CLIENT_SWEEP_INTERVAL_SECONDS = 15.0
+
+#: The argument names that mean "where". They are filled from the project the
+#: session is working in when the utterance does not name one.
+_LOCATION_ARGUMENTS = frozenset(
+    {"workspace", "path", "directory", "project", "repo", "root", "folder"}
+)
+
+#: The argument names that mean "the whole instruction". A task is not the
+#: words after the alias - it is the request the user made.
+_TASK_ARGUMENTS = frozenset({"task", "request", "instruction", "goal"})
 
 
 @dataclass
@@ -147,6 +159,8 @@ class DecisionEngine:
         self._sweeper: threading.Thread | None = None
         self._sweeper_lock = threading.Lock()
         self._stop_sweeper = threading.Event()
+        #: The project a task runs in when the user does not name one.
+        self._default_project = os.environ.get("SIDEKICK_PROJECT_DIR") or None
 
     # ------------------------------------------------------------------
     # Public entry point
@@ -154,6 +168,12 @@ class DecisionEngine:
 
     def handle(self, request: SidekickRequest) -> SidekickResponse:
         session = self.sessions.get(request.session_id)
+        if session.project is None:
+            # The configured project is read per request, so a deployment can
+            # set it at any time.
+            session.project = self._default_project or os.environ.get(
+                "SIDEKICK_PROJECT_DIR"
+            ) or None
 
         cached = session.cached_response(request.request_id)
         if cached is not None:
@@ -352,6 +372,11 @@ class DecisionEngine:
             return self._finish_segment(
                 segment, session, request, decision, info, correction, text
             )
+
+        # A path the user quotes is the project they are working in.
+        quoted = parse_quoted_text(text)
+        if quoted and _looks_like_a_path(quoted):
+            session.project = quoted
 
         decision, model_info = self._decide(self._query(text, session))
 
@@ -604,6 +629,22 @@ class DecisionEngine:
             else None
         )
 
+        # A quoted path belongs to the *location* argument ("workspace"), not
+        # to the other text arguments: in "fix the failing tests in
+        # \"C:/work/project\"" the path is the project and the rest is the
+        # task.
+        quoted_path = parse_quoted_text(text)
+        quoted_is_path = bool(quoted_path and _looks_like_a_path(quoted_path))
+        location_argument = None
+        if quoted_is_path:
+            for argument in spec.arguments:
+                if (
+                    argument.name in _LOCATION_ARGUMENTS
+                    or set(argument.aliases) & _LOCATION_ARGUMENTS
+                ):
+                    location_argument = argument
+                    break
+
         for arg in spec.arguments:
             if arg.type == ARG_ENUM:
                 value = _match_enum(arg.enum, text)
@@ -640,7 +681,25 @@ class DecisionEngine:
                         Entity(name=arg.name, value=str(hints.count.count), source="parser")
                     )
             elif arg.type == ARG_STRING:
-                value = self._capture_text(arg, spec, text, hints)
+                if arg.name in _TASK_ARGUMENTS or set(arg.aliases) & _TASK_ARGUMENTS:
+                    # A task is the whole instruction ("fix the failing
+                    # tests in my project"), not the words after the alias.
+                    value = _clean_remainder(
+                        _strip_location(text, quoted_path if quoted_is_path else None)
+                    )
+                else:
+                    value = self._capture_text(
+                        arg,
+                        spec,
+                        text,
+                        hints,
+                        quoted_path=(
+                            quoted_path if arg is location_argument else None
+                        ),
+                        skip_quoted=bool(
+                            quoted_is_path and arg is not location_argument
+                        ),
+                    )
                 if value is not None:
                     arguments[arg.name] = value
                     entities.append(
@@ -649,6 +708,20 @@ class DecisionEngine:
 
         # The destination the model picked was already applied above, when it
         # was one of the destinations the utterance mentions.
+
+        # A location argument the utterance did not name comes from the
+        # project the session is working in: a voice user should not have to
+        # spell out a path for every task.
+        if session.project:
+            for arg in spec.arguments:
+                if arg.name in arguments:
+                    continue
+                if not (arg.name in _LOCATION_ARGUMENTS or set(arg.aliases) & _LOCATION_ARGUMENTS):
+                    continue
+                arguments[arg.name] = session.project
+                entities.append(
+                    Entity(name=arg.name, value=session.project, source="session")
+                )
 
         # Session context fills arguments the utterance left out, but only for
         # the same tool - that is what makes "play that again" work. An
@@ -779,10 +852,25 @@ class DecisionEngine:
         spec: ToolSpec,
         text: str,
         hints: ArgumentHints,
+        quoted_path: str | None = None,
+        skip_quoted: bool = False,
     ) -> str | None:
         """Capture a free-text argument according to its capture mode."""
         if arg.capture == CAPTURE_NONE:
             return None
+        if quoted_path is not None:
+            return quoted_path
+        if skip_quoted and hints.text_value is not None:
+            # The quoted text is the path of the location argument; it is not
+            # this argument's value.
+            quoted = hints.text_value
+            hints = ArgumentHints(
+                duration_seconds=hints.duration_seconds,
+                count=hints.count,
+                text_value=None,
+                values=hints.values,
+            )
+            text = text.replace(quoted, " ")
         if arg.capture == CAPTURE_WHEN:
             expression = find_when_expression(text)
             if expression is None:
@@ -2021,11 +2109,34 @@ class DecisionEngine:
 # ----------------------------------------------------------------------
 
 
+def _looks_like_a_path(value: str) -> bool:
+    """Does this quoted value look like a path?"""
+    if not value:
+        return False
+    if re.match(r"^[A-Za-z]:[\\/]", value):
+        return True
+    return value.startswith(("/", "~/", "./", "../")) or ("/" in value or "\\" in value)
+
+
 def _clean_remainder(text: str) -> str | None:
     """Strip the filler words from a leftover text."""
     value = re.sub(r"\s+", " ", text).strip(" ,.;:-")
-    value = re.sub(r"^(?:that|to|for|about|with|and|me|my|i)\s+", "", value, flags=re.I)
-    return value or None
+    value = re.sub(r"^(?:that|to|for|about|with|and|me|my|i|in|at)\s+", "", value, flags=re.I)
+    value = re.sub(r"\s+(?:in|at|for|to|on|my|the|a|an)$", "", value, flags=re.I)
+    return value.strip(" ,.;:-") or None
+
+
+def _strip_location(text: str, quoted_path: str | None) -> str:
+    """The utterance without the quoted location.
+
+    The quotes go with the path: they are part of how the user said it, not
+    part of the task.
+    """
+    if not quoted_path:
+        return text
+    for form in (f'"{quoted_path}"', f"'{quoted_path}'", quoted_path):
+        text = text.replace(form, " ")
+    return text
 
 
 class _MissingAsEmpty(dict):

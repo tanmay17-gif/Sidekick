@@ -73,6 +73,9 @@ class SessionState:
     last_tool: str | None = None
     last_arguments: dict[str, Any] = field(default_factory=dict)
     last_entities: list[Entity] = field(default_factory=list)
+    #: The project the user is working in. A voice user should not have to
+    #: spell out a path for every task; the core remembers it.
+    project: str | None = None
     active_task_id: str | None = None
     suspended_task_ids: list[str] = field(default_factory=list)
     actions: "OrderedDict[str, Action]" = field(default_factory=OrderedDict)

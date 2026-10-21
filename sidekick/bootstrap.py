@@ -48,8 +48,21 @@ DEFAULT_WORKSPACE = Path(
 CLIENT_CAPABILITIES_FILE = Path(__file__).parent / "client_capabilities.json"
 
 
-def build_registry(workspace: Path | str | None = None) -> ToolRegistry:
-    """Register the adapters that ship with the core."""
+def build_registry(
+    workspace: Path | str | None = None,
+    execution_url: str | None = None,
+) -> ToolRegistry:
+    """Register the adapters that ship with the core.
+
+    The execution service adapter (Agent 2) is *declared* rather than
+    registered when no execution service is configured, so the capability is
+    visible to the model and the UI while calling it fails honestly with
+    ``tool_unavailable`` instead of pretending to work.
+
+    ``execution_url`` overrides the ``SIDEKICK_EXECUTION_URL`` environment
+    variable, which is how a deployment (or a test) points the core at a
+    specific execution service.
+    """
     root = Path(workspace or DEFAULT_WORKSPACE).resolve()
     registry = ToolRegistry()
     timer_tool = TimerSetTool()
@@ -60,6 +73,21 @@ def build_registry(workspace: Path | str | None = None) -> ToolRegistry:
     registry.register(MediaOpenTool())
     registry.register(WebSearchTool())
     registry.register(ReminderSetTool())
+
+    # The execution service adapter lives in its own module (Agent 2). The
+    # core works without it, and picks it up as soon as it is there.
+    try:
+        from .tools.execution import ExecutionServiceAdapter
+    except ImportError:  # pragma: no cover - the adapter is not present yet
+        ExecutionServiceAdapter = None  # type: ignore[assignment]
+
+    if ExecutionServiceAdapter is not None:
+        execution = ExecutionServiceAdapter(execution_url)
+        if execution.configured:
+            registry.register(execution)
+        else:
+            registry.declare(execution.spec)
+
     load_client_capabilities(registry)
     return registry
 
