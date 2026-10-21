@@ -1,7 +1,7 @@
 # Core ↔ Execution Integration (Agent 2)
 
 **Owner:** Agent 2 (Real Execution & Integrations)
-**Status:** implemented, in review (branch `agent2/core-integration`)
+**Status:** implemented, in review (branch `agent2/execution-foundation`, PR #4)
 
 How the core brain (Agent 1) and the execution service (Agent 2) fit
 together, and what each side guarantees.
