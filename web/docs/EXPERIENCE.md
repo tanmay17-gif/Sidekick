@@ -15,8 +15,8 @@ defined in `.sidekick/TEAM_PLAYBOOK.md` §8.
 | Movie playback | `REAL_AND_VERIFIED` | Real MP4 (`tears_of_steel_720p.mp4`) with native controls; the E2E suite covers the load-failure recovery path. |
 | Subtitle synchronisation | `REAL_AND_VERIFIED` | Cue lookup is a pure function over `video.currentTime`; verified by unit tests against the shipped official track and by an integration test that moves the media clock. |
 | Companion events | `REAL_AND_VERIFIED` (subtitle-based) | Each event timestamp is the real start time of a real cue. No vision pipeline exists, and the UI says so. |
-| Intent resolution / decision engine | `REAL_BUT_UNVERIFIED` | The browser sends the contract and renders the contract. The resolver is Agent 1's; the E2E suite runs against the labelled development stub. |
-| Coding job execution and diff | `REAL_BUT_UNVERIFIED` | The client renders the real diff from the response payload (including unified-diff line colouring). The job itself is Agent 2's. |
+| Intent resolution / decision engine | `REAL_AND_VERIFIED` against the real backend | Verified on 2026-10-21 against Agent 1's `sidekick/api` implementation (branch `agent1/core-brain-v1`): the client showed `backend LIVE`, the real tool inventory, the streamed progress events and the action the real engine chose. Re-run with `node scripts/verify-real-backend.mjs`. |
+| Coding job execution and diff | `REAL_BUT_UNVERIFIED` | The client renders the real diff from the response payload (including unified-diff line colouring). The job itself is Agent 2's and was not exercised end-to-end by this client. |
 | Music providers | `NOT_CONFIGURED` | No provider credentials exist. The UI shows the provider list with `unconfigured` state and explains what is needed. |
 | Chess | `REAL_BUT_UNVERIFIED` | The board is rendered from the FEN the backend reports; move legality is never decided in the browser. |
 | Tic-Tac-Toe (local) | `REAL_AND_VERIFIED` | The opponent is a real minimax search over the rules in `web/src/lib/games/tictactoe.ts`. It is labelled `local` so it is never confused with a backend-backed game. |
@@ -36,6 +36,36 @@ The games surface has two clearly separated groups:
 
 `web/src/lib/games/registry.ts` is the single place to add another local
 activity.
+
+### Verified against Agent 1's real backend
+
+On 2026-10-21 the client was run against Agent 1's actual FastAPI backend
+(`sidekick/api/app.py`, branch `agent1/core-brain-v1`), served through the Vite
+proxy:
+
+- the capability strip read `backend LIVE` and listed the five real tools
+  (`note.write`, `note.read`, `timer.set`, `timer.list`, `media.open`);
+- a typed request was resolved by the real engine, which chose `note.write`
+  and **actually wrote the note to disk** - the result payload showed the real
+  path, byte count and title;
+- the streamed progress events arrived over the event stream with real
+  timestamps ("interpreted with sidekick/rule-engine-v1", "1 action(s) planned",
+  "note.write started", "note.write succeeded");
+- the response metadata showed the real provider and model
+  (`sidekick` / `rule-engine-v1`, `fallback_used: true`), which the client
+  surfaces as `rule-engine-v1 (fallback)` rather than hiding the fallback.
+
+`web/scripts/verify-real-backend.mjs` automates those checks. It is kept out of
+`npm run test:e2e` because it needs the Python backend running:
+
+```bash
+# terminal 1 - the real backend
+uvicorn sidekick.api.app:create_app --factory --host 127.0.0.1 --port 8033
+# terminal 2 - the built client, pointed at it
+SIDECKICK_API_TARGET=http://127.0.0.1:8033 npx vite preview --port 4175
+# terminal 3
+node scripts/verify-real-backend.mjs http://127.0.0.1:4175 http://127.0.0.1:8033
+```
 
 ## Voice input - real behaviour and limits
 

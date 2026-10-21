@@ -41,6 +41,24 @@ npm run test:e2e    # playwright (real browser, real HTTP)
 
 `npm run verify` runs lint, typecheck, unit tests and the build in one go.
 
+### Against the real backend
+
+`npm run test:e2e` runs against the labelled development stub. To check the
+client against a **real** Sidekick backend:
+
+```bash
+# terminal 1 - the real backend
+uvicorn sidekick.api.app:create_app --factory --host 127.0.0.1 --port 8033
+# terminal 2 - the built client, pointed at it
+SIDECKICK_API_TARGET=http://127.0.0.1:8033 npx vite preview --port 4175
+# terminal 3
+node scripts/verify-real-backend.mjs http://127.0.0.1:4175 http://127.0.0.1:8033
+```
+
+The script asserts that the capability strip reports the backend's own mode,
+that every published capability is shown, that a request is answered by the
+real engine with the tool it chose, and that nothing is faked in the client.
+
 ## What is real and what is not
 
 | Capability | Status | Notes |
