@@ -416,6 +416,36 @@ This needs no provider account, so it is `REAL`. It is the capability behind
 action did not reach `succeeded`. The JSON text payload is
 `{"action": {...}, "result": {...}, "error": {...}}`.
 
+## 8a. Core integration
+
+The execution service is driven by the core brain through
+`sidekick/tools/execution.py`, which implements the core's `ToolAdapter`
+protocol over this HTTP/SSE surface. The identifier mapping, the approval
+chaining, the event forwarding and the failure semantics are documented in
+`docs/core-integration.md`.
+
+## 8b. Provider configuration
+
+The coding provider is the only part of the pipeline that needs a credential.
+The configuration is parsed and validated once; a broken configuration never
+silently falls back to a different provider.
+
+| Variable | Meaning |
+|---|---|
+| `SIDEKICK_PROVIDER` | `auto` (default), `http_api`, `local_cli`, `simulated`. An unknown value is a configuration error that names the supported options. |
+| `SIDEKICK_LLM_API_KEY` | The bearer token for an OpenAI-compatible endpoint. Never logged, printed, returned in a capability report or included in an error. |
+| `SIDEKICK_LLM_BASE_URL` | The endpoint base URL. Must be `http`/`https` and must not carry credentials. |
+| `SIDEKICK_LLM_MODEL` | The model id. Reported as the real model identity. |
+| `SIDEKICK_LLM_TIMEOUT` | Seconds. Must be `0 < t <= 600`. |
+| `SIDEKICK_CODING_CLI` | The authorized local coding CLI to run. |
+| `SIDEKICK_CODING_CLI_ARGS` | A JSON array of argument templates (`{task}`, `{workspace}`, `{context}`). |
+| `SIDEKICK_CODING_CLI_TIMEOUT` | Seconds, same bound as above. |
+| `SIDEKICK_ALLOW_SIMULATED_PROVIDER` | `1` enables the simulated provider. It is refused when `SIDEKICK_ENV=production`. |
+
+`GET /v1/capabilities` reports the active provider and the parsed
+configuration under `provider` and `provider_config`. The configuration block
+never contains the key - only `api_key_present`.
+
 ## 9. Proposed additions to `.sidekick/API_CONTRACTS.md`
 
 Agent 1 owns that file. These are the additive proposals; none of them

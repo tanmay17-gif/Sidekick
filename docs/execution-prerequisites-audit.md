@@ -82,7 +82,23 @@ service is reached over the same contract.
 | Local model server | **Not installed** | no `ollama` / `llamafile` |
 | Local provider config files | **Absent** | no `~/.anthropic`, `~/.claude.json`, `~/.codex`, `~/.aider.conf.yml` |
 
-### 3.1 Consequence: honest labelling, no faking
+### 3.1 Configuration is validated, never guessed
+
+The provider configuration is parsed once and validated
+(`sidekick_execution/providers/config.py`). A broken configuration produces an
+`UnconfiguredCodingProvider` that *names the problems* instead of silently
+falling back to a different provider. The checks are:
+
+* an unknown `SIDEKICK_PROVIDER` is rejected and the supported names are listed;
+* the base URL must be `http`/`https`, must have a host and must not carry credentials;
+* the timeout must be `0 < t <= 600` seconds;
+* the model name must not be empty;
+* `SIDEKICK_CODING_CLI_ARGS` must be a JSON array of strings.
+
+The API key is never logged, printed, returned in a capability report or
+included in an error message - only `api_key_present` is published.
+
+### 3.2 Consequence: honest labelling, no faking
 
 Because no model credential or local coding CLI exists on this machine, the
 coding workflow has two clearly separated halves:

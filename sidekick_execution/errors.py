@@ -44,6 +44,9 @@ PROVIDER_NOT_CONFIGURED = "provider_not_configured"
 PROVIDER_UNAVAILABLE = "provider_unavailable"
 PROVIDER_ERROR = "provider_error"
 PROVIDER_OUTPUT_INVALID = "provider_output_invalid"
+PROVIDER_AUTH_FAILED = "provider_auth_failed"
+PROVIDER_RATE_LIMITED = "provider_rate_limited"
+PROVIDER_CONFIG_INVALID = "provider_config_invalid"
 
 JOB_NOT_FOUND = "job_not_found"
 JOB_NOT_CANCELLABLE = "job_not_cancellable"
@@ -82,6 +85,9 @@ ERROR_CODES: Dict[str, str] = {
     PROVIDER_UNAVAILABLE: "The configured coding provider is not reachable.",
     PROVIDER_ERROR: "The coding provider failed while producing a change plan.",
     PROVIDER_OUTPUT_INVALID: "The coding provider returned output that could not be parsed.",
+    PROVIDER_AUTH_FAILED: "The coding provider rejected the credentials.",
+    PROVIDER_RATE_LIMITED: "The coding provider is rate limiting this deployment.",
+    PROVIDER_CONFIG_INVALID: "The coding provider configuration is not valid.",
     JOB_NOT_FOUND: "No job exists with that identifier.",
     JOB_NOT_CANCELLABLE: "The job is not in a cancellable state.",
     JOB_INTERRUPTED: "The job was interrupted by a service restart.",

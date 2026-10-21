@@ -39,7 +39,9 @@ from .base import (
     CodingRequest,
     ProviderResult,
     ProviderStatus,
+    validate_change_plan,
 )
+from .config import ProviderConfig
 
 DEFAULT_TIMEOUT = 300.0
 DEFAULT_ARGS: List[str] = ["--json-plan", "--task", "{task}", "--workspace", "{workspace}"]
@@ -57,10 +59,15 @@ class LocalCliCodingProvider(CodingProvider):
         args: Optional[List[str]] = None,
         timeout: Optional[float] = None,
         runner: Optional[CommandRunner] = None,
+        *,
+        config: Optional[ProviderConfig] = None,
     ) -> None:
-        self.cli = cli if cli is not None else os.environ.get("SIDEKICK_CODING_CLI", "")
+        self.config = config or ProviderConfig.from_env()
+        self.cli = cli if cli is not None else self.config.cli
         if args is not None:
             self.args = list(args)
+        elif self.config.cli_args:
+            self.args = list(self.config.cli_args)
         else:
             raw_args = os.environ.get("SIDEKICK_CODING_CLI_ARGS")
             self.args = list(DEFAULT_ARGS)
@@ -71,11 +78,19 @@ class LocalCliCodingProvider(CodingProvider):
                     parsed = None
                 if isinstance(parsed, list):
                     self.args = [str(part) for part in parsed]
-        self.timeout = float(timeout or os.environ.get("SIDEKICK_CODING_CLI_TIMEOUT") or DEFAULT_TIMEOUT)
+        self.timeout = float(timeout if timeout is not None else self.config.cli_timeout_seconds or DEFAULT_TIMEOUT)
         self.runner = runner or CommandRunner()
 
     # -- status ------------------------------------------------------------
     def status(self) -> ProviderStatus:
+        problems = [problem for problem in self.config.problems if "SIDEKICK_CODING_CLI" in problem]
+        if problems:
+            return ProviderStatus(
+                available=False,
+                level=ClaimLevel.UNAVAILABLE,
+                reason="invalid_configuration",
+                detail={"provider": self.name, "problems": problems},
+            )
         if not self.cli:
             return ProviderStatus(
                 available=False,
@@ -175,6 +190,20 @@ class LocalCliCodingProvider(CodingProvider):
             )
         plan.provider = self.name
         plan.model = self.cli
+        try:
+            validate_change_plan(
+                plan,
+                max_edits=self.config.max_edits,
+                max_file_bytes=self.config.max_file_bytes,
+            )
+        except SidekickError as exc:
+            return ProviderResult(
+                plan=None,
+                status=ProviderStatus(True, ClaimLevel.REAL, "invalid_output", {"provider": self.name}),
+                error=exc,
+                latency_ms=latency,
+                raw_output=result.stdout[:8000],
+            )
         return ProviderResult(
             plan=plan,
             status=ProviderStatus(True, ClaimLevel.REAL, "ok", {"provider": self.name}),

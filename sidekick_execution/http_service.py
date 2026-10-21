@@ -177,7 +177,10 @@ class ExecutionRequestHandler(BaseHTTPRequestHandler):
         token = body.get("confirmation_token")
         if not isinstance(token, str) or not token:
             raise SidekickError("approval_required", "A 'confirmation_token' is required.")
-        action = self.service.job_manager.approve(action_id, token)
+        approved_by = body.get("approved_by")
+        if approved_by is not None and not isinstance(approved_by, str):
+            raise SidekickError("invalid_request", "'approved_by' must be a string.")
+        action = self.service.job_manager.approve(action_id, token, approved_by=approved_by)
         self._send_json(200, action.to_dict())
 
     # -- SSE ---------------------------------------------------------------

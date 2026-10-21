@@ -3,22 +3,21 @@
 This provider performs a genuine network call to a configured chat-completions
 endpoint. It is **not** connected unless the deployment supplies credentials.
 
-Configuration (environment):
+Configuration (environment, all optional except the key):
 
-``SIDEKICK_LLM_API_KEY``  Required. The bearer token for the endpoint.
-``SIDEKICK_LLM_BASE_URL``  Optional. Defaults to ``https://api.openai.com/v1``.
-``SIDEKICK_LLM_MODEL``     Optional. Defaults to ``gpt-4o-mini``.
-``SIDEKICK_LLM_TIMEOUT``   Optional seconds. Defaults to 120.
+``SIDEKICK_LLM_API_KEY``   Required for this provider. The bearer token.
+``SIDEKICK_LLM_BASE_URL``  Defaults to ``https://api.openai.com/v1``.
+``SIDEKICK_LLM_MODEL``     Defaults to ``gpt-4o-mini``.
+``SIDEKICK_LLM_TIMEOUT``   Defaults to 120 seconds.
 
-When the key is missing the provider reports ``available=False`` with the
-reason ``not_configured``. The execution service surfaces that reason to the
-UI instead of pretending to be connected.
+When the key is missing, or the configuration is invalid, the provider reports
+``available=False`` with the exact reason. The execution service surfaces that
+reason to the UI instead of pretending to be connected.
 """
 
 from __future__ import annotations
 
 import json
-import os
 import time
 import urllib.error
 import urllib.request
@@ -33,11 +32,9 @@ from .base import (
     CodingRequest,
     ProviderResult,
     ProviderStatus,
+    validate_change_plan,
 )
-
-DEFAULT_BASE_URL = "https://api.openai.com/v1"
-DEFAULT_MODEL = "gpt-4o-mini"
-DEFAULT_TIMEOUT = 120.0
+from .config import DEFAULT_BASE_URL, DEFAULT_MODEL, DEFAULT_TIMEOUT_SECONDS, ProviderConfig
 
 SYSTEM_PROMPT = (
     "You are a careful coding agent operating inside an authorized workspace. "
@@ -61,14 +58,33 @@ class HttpApiCodingProvider(CodingProvider):
         base_url: Optional[str] = None,
         model: Optional[str] = None,
         timeout: Optional[float] = None,
+        *,
+        config: Optional[ProviderConfig] = None,
     ) -> None:
-        self.api_key = api_key if api_key is not None else os.environ.get("SIDEKICK_LLM_API_KEY", "")
-        self.base_url = (base_url or os.environ.get("SIDEKICK_LLM_BASE_URL") or DEFAULT_BASE_URL).rstrip("/")
-        self.model = model or os.environ.get("SIDEKICK_LLM_MODEL") or DEFAULT_MODEL
-        self.timeout = float(timeout or os.environ.get("SIDEKICK_LLM_TIMEOUT") or DEFAULT_TIMEOUT)
+        self.config = config or ProviderConfig.from_env()
+        self.api_key = api_key if api_key is not None else self.config.api_key
+        self.base_url = (base_url or self.config.base_url or DEFAULT_BASE_URL).rstrip("/")
+        self.model = model or self.config.model or DEFAULT_MODEL
+        self.timeout = float(timeout if timeout is not None else self.config.timeout_seconds or DEFAULT_TIMEOUT_SECONDS)
 
     # -- status ------------------------------------------------------------
     def status(self) -> ProviderStatus:
+        problems = [
+            problem
+            for problem in self.config.problems
+            if "SIDEKICK_LLM" in problem or "provider" in problem
+        ]
+        if problems:
+            return ProviderStatus(
+                available=False,
+                level=ClaimLevel.UNAVAILABLE,
+                reason="invalid_configuration",
+                detail={
+                    "provider": self.name,
+                    "problems": problems,
+                    "hint": "Fix the reported configuration problems.",
+                },
+            )
         if not self.api_key:
             return ProviderStatus(
                 available=False,
@@ -83,20 +99,30 @@ class HttpApiCodingProvider(CodingProvider):
             available=True,
             level=ClaimLevel.REAL,
             reason="configured",
-            detail={"provider": self.name, "base_url": self.base_url, "model": self.model},
+            detail={
+                "provider": self.name,
+                "base_url": self.base_url,
+                "model": self.model,
+                "timeout_seconds": self.timeout,
+            },
         )
 
     # -- planning ----------------------------------------------------------
     def plan(self, request: CodingRequest) -> ProviderResult:
         status = self.status()
         if not status.available:
+            code = (
+                errors.PROVIDER_CONFIG_INVALID
+                if status.reason == "invalid_configuration"
+                else errors.PROVIDER_NOT_CONFIGURED
+            )
             return ProviderResult(
                 plan=None,
                 status=status,
                 error=SidekickError(
-                    errors.PROVIDER_NOT_CONFIGURED,
-                    "No coding provider is configured for this deployment.",
-                    details={"provider": self.name, "reason": status.reason},
+                    code,
+                    "The coding provider is not usable in this deployment.",
+                    details={"provider": self.name, "reason": status.reason, **status.detail},
                 ),
             )
         payload = {
@@ -135,9 +161,23 @@ class HttpApiCodingProvider(CodingProvider):
             )
         plan.provider = self.name
         plan.model = self.model
+        try:
+            validate_change_plan(
+                plan,
+                max_edits=self.config.max_edits,
+                max_file_bytes=self.config.max_file_bytes,
+            )
+        except SidekickError as exc:
+            return ProviderResult(
+                plan=None,
+                status=ProviderStatus(True, ClaimLevel.REAL, "invalid_output", {"provider": self.name}),
+                error=exc,
+                latency_ms=latency,
+                raw_output=raw[:8000],
+            )
         return ProviderResult(
             plan=plan,
-            status=ProviderStatus(True, ClaimLevel.REAL, "ok", {"provider": self.name}),
+            status=ProviderStatus(True, ClaimLevel.REAL, "ok", {"provider": self.name, "model": self.model}),
             latency_ms=latency,
         )
 
@@ -152,9 +192,7 @@ class HttpApiCodingProvider(CodingProvider):
             parts.append(f"Tests are run with: {' '.join(request.test_command)}")
         for constraint in request.constraints:
             parts.append(f"Constraint: {constraint}")
-        parts.append(
-            "Return only the JSON object describing the edits that fulfil the task."
-        )
+        parts.append("Return only the JSON object describing the edits that fulfil the task.")
         return "\n\n".join(parts)
 
     def _post(self, payload: Dict[str, Any]) -> str:
@@ -172,23 +210,75 @@ class HttpApiCodingProvider(CodingProvider):
         )
         try:
             with urllib.request.urlopen(request, timeout=self.timeout) as response:
-                body = response.read().decode("utf-8", "replace")
+                return response.read().decode("utf-8", "replace")
         except urllib.error.HTTPError as exc:
-            detail = exc.read().decode("utf-8", "replace")[:500]
+            raise self._http_error(exc) from exc
+        except TimeoutError as exc:
             raise SidekickError(
-                errors.PROVIDER_ERROR,
-                f"The coding provider returned HTTP {exc.code}.",
-                details={"provider": self.name, "status": exc.code},
-                retryable=exc.code >= 500,
+                errors.COMMAND_TIMEOUT,
+                f"The coding provider did not answer within {self.timeout} seconds.",
+                details={"provider": self.name, "timeout_seconds": self.timeout},
+                timeout=True,
+                retryable=True,
             ) from exc
-        except (urllib.error.URLError, TimeoutError, OSError) as exc:
+        except (urllib.error.URLError, OSError) as exc:
+            reason = getattr(exc, "reason", exc)
+            if isinstance(reason, TimeoutError):
+                raise SidekickError(
+                    errors.COMMAND_TIMEOUT,
+                    f"The coding provider did not answer within {self.timeout} seconds.",
+                    details={"provider": self.name, "timeout_seconds": self.timeout},
+                    timeout=True,
+                    retryable=True,
+                ) from exc
             raise SidekickError(
                 errors.PROVIDER_UNAVAILABLE,
-                f"The coding provider could not be reached: {exc}",
+                f"The coding provider could not be reached: {reason}",
                 details={"provider": self.name},
                 retryable=True,
             ) from exc
-        return body
+
+    def _http_error(self, exc: urllib.error.HTTPError) -> SidekickError:
+        """Translate an HTTP status into a precise, actionable error."""
+        code = exc.code
+        detail = exc.read().decode("utf-8", "replace")[:500]
+        if code in (401, 403):
+            return SidekickError(
+                errors.PROVIDER_AUTH_FAILED,
+                f"The coding provider rejected the credentials (HTTP {code}).",
+                details={"provider": self.name, "status": code},
+                retryable=False,
+            )
+        if code == 429:
+            retry_after = None
+            try:
+                retry_after = exc.headers.get("Retry-After")
+            except Exception:  # pragma: no cover - header access is best effort
+                retry_after = None
+            return SidekickError(
+                errors.PROVIDER_RATE_LIMITED,
+                "The coding provider is rate limiting this deployment (HTTP 429).",
+                details={
+                    "provider": self.name,
+                    "status": code,
+                    "retry_after": retry_after,
+                },
+                retryable=True,
+            )
+        if code in (408, 504):
+            return SidekickError(
+                errors.COMMAND_TIMEOUT,
+                f"The coding provider timed out (HTTP {code}).",
+                details={"provider": self.name, "status": code},
+                timeout=True,
+                retryable=True,
+            )
+        return SidekickError(
+            errors.PROVIDER_ERROR,
+            f"The coding provider returned HTTP {code}.",
+            details={"provider": self.name, "status": code, "body": detail},
+            retryable=code >= 500,
+        )
 
     @staticmethod
     def _extract_content(raw: str) -> str:

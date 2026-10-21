@@ -290,8 +290,19 @@ class JobManager:
             )
 
     # -- approval ----------------------------------------------------------
-    def approve(self, action_id: str, confirmation_token: str) -> Action:
-        """Approve a pending action and start it."""
+    def approve(
+        self,
+        action_id: str,
+        confirmation_token: str,
+        *,
+        approved_by: Optional[str] = None,
+    ) -> Action:
+        """Approve a pending action and start it.
+
+        ``approved_by`` names the authority that collected the human's
+        confirmation (for example the core brain). It is recorded in the event
+        stream as an audit trail; it never weakens the check itself.
+        """
         action = self.get(action_id)
         if action.state != AWAITING_CONFIRMATION:
             raise SidekickError(
@@ -300,6 +311,13 @@ class JobManager:
                 details={"action_id": action_id, "status": action.state},
             )
         self.approvals.consume(action_id, action.arguments, confirmation_token)
+        if approved_by:
+            self._emit(
+                action,
+                JOB_STATUS,
+                f"Approved by {approved_by}.",
+                {"status": action.state, "approved_by": approved_by},
+            )
         self._start(action)
         self._persist()
         return action

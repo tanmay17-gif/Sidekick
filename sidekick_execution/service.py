@@ -39,7 +39,8 @@ from .approval import ApprovalStore
 from .errors import SidekickError
 from .events import EventBus
 from .jobs import JobManager, JobStore
-from .providers.base import ClaimLevel, CodingProvider, ProviderStatus
+from .providers.base import ClaimLevel, CodingProvider, ProviderStatus, UnconfiguredCodingProvider
+from .providers.config import ProviderConfig
 from .providers.http_api import HttpApiCodingProvider
 from .providers.local_cli import LocalCliCodingProvider
 from .providers.simulated import SimulatedCodingProvider
@@ -128,7 +129,11 @@ class ExecutionService:
             timeout_seconds=config.command_timeout_seconds,
             max_output_bytes=config.max_output_bytes,
         )
-        chosen = provider or select_provider(config.provider, command_policy)
+        chosen = provider or select_provider(
+            config.provider,
+            command_policy,
+            config=ProviderConfig.from_env(),
+        )
         for secret in chosen.secret_values():
             command_policy.add_secret(secret)
 
@@ -375,7 +380,20 @@ class ExecutionService:
         outcome = adapter.execute(request, cancel_event=ctx.cancel_event, progress=ctx.progress)
         payload = outcome.to_dict()
         if outcome.error is not None:
-            raise outcome.error
+            # The failure carries the real outcome with it: the diff, the
+            # changed files and the test result must reach the UI even when
+            # the action failed, otherwise the user cannot see what happened.
+            error = SidekickError(
+                outcome.error.code,
+                outcome.error.message,
+                retryable=outcome.error.retryable,
+                timeout=outcome.error.timeout,
+                details={
+                    **(outcome.error.details or {}),
+                    "outcome": payload,
+                },
+            )
+            raise error
         return payload
 
     def _handle_run_tests(self, arguments: Dict[str, Any], ctx: ToolContext) -> Dict[str, Any]:
@@ -546,6 +564,7 @@ class ExecutionService:
     def capabilities(self) -> Dict[str, Any]:
         report = self.registry.capabilities()
         report["provider"] = self.provider.status().to_dict()
+        report["provider_config"] = ProviderConfig.from_env().public_dict()
         report["workspace_policy"] = self.workspace_policy.describe()
         return report
 
@@ -553,23 +572,36 @@ class ExecutionService:
 def select_provider(
     name: str = "auto",
     command_policy: Optional[CommandPolicy] = None,
+    *,
+    config: Optional[ProviderConfig] = None,
 ) -> CodingProvider:
     """Choose a coding provider by name.
 
     ``auto`` prefers a real provider (HTTP API, then an authorized local CLI)
     and falls back to the simulated provider only when it is explicitly
     enabled. It never returns an unconfigured provider silently -- the caller
-    gets a provider whose ``status()`` explains exactly what is missing.
+    gets a provider whose ``status()`` explains exactly what is missing, and a
+    broken configuration produces an
+    :class:`~sidekick_execution.providers.base.UnconfiguredCodingProvider`
+    that names the problems instead of quietly using something else.
     """
-    name = (name or "auto").lower()
+    config = config or ProviderConfig.from_env()
+    if config.problems:
+        return UnconfiguredCodingProvider(list(config.problems), {"requested": name})
+
+    name = (name or config.name or "auto").strip().lower()
+    runner = CommandRunner(command_policy) if command_policy else None
     if name == "http_api":
-        return HttpApiCodingProvider()
+        return HttpApiCodingProvider(config=config)
     if name == "local_cli":
-        return LocalCliCodingProvider(runner=CommandRunner(command_policy) if command_policy else None)
+        return LocalCliCodingProvider(config=config, runner=runner)
     if name == "simulated":
         return SimulatedCodingProvider()
 
-    candidates = [HttpApiCodingProvider(), LocalCliCodingProvider(runner=CommandRunner(command_policy) if command_policy else None)]
+    candidates = [
+        HttpApiCodingProvider(config=config),
+        LocalCliCodingProvider(config=config, runner=runner),
+    ]
     for candidate in candidates:
         if candidate.status().available:
             return candidate
