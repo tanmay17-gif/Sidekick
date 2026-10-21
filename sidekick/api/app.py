@@ -137,16 +137,35 @@ def create_app(engine: DecisionEngine | None = None) -> FastAPI:
 
         for spec in catalog:
             available = engine.registry.is_available(spec.name)
-            state = "live" if available else "unavailable"
+            adapter = engine.registry.get(spec.name)
+            # An adapter may describe itself more precisely than "there is an
+            # adapter". The execution service adapter (Agent 2) reports
+            # whether a *real* coding provider is behind it, so the browser
+            # never sees "live" for a capability that would fail.
+            reported = None
+            if adapter is not None:
+                describe = getattr(adapter, "capability_status", None)
+                if callable(describe):
+                    try:
+                        reported = describe()
+                    except Exception:  # noqa: BLE001 - never break the report
+                        reported = None
+            status = "REAL" if available else "NOT_IMPLEMENTED"
             detail = (
                 "backed by a real adapter"
                 if available
                 else "declared in the catalog, no adapter is wired up yet"
             )
-            capability_items.append({"id": spec.name, "state": state, "detail": detail})
-
-            status = "REAL" if available else "NOT_IMPLEMENTED"
+            simulated = False
+            if isinstance(reported, dict) and reported.get("status"):
+                # The adapter describes itself more precisely than "there is
+                # an adapter" - including a declared capability that explains
+                # why it is not live.
+                status = str(reported["status"])
+                detail = str(reported.get("detail") or detail)
+                simulated = status == "SIMULATED"
             status_counts[status] = status_counts.get(status, 0) + 1
+            capability_items.append({"id": spec.name, "state": "live" if available else "unavailable", "detail": detail})
             tool_items.append(
                 {
                     "tool": spec.name,
@@ -156,7 +175,7 @@ def create_app(engine: DecisionEngine | None = None) -> FastAPI:
                     "risk_level": spec.risk.value,
                     "status": status,
                     "status_detail": detail,
-                    "simulated": False,
+                    "simulated": simulated,
                 }
             )
 
@@ -167,7 +186,7 @@ def create_app(engine: DecisionEngine | None = None) -> FastAPI:
             "tools": tool_items,
             "tool_count": len(tool_items),
             "status_counts": status_counts,
-            "any_simulated": False,
+            "any_simulated": any(item["simulated"] for item in tool_items),
             "games": [],
             "providers": [],
         }

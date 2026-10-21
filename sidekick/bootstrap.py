@@ -22,6 +22,7 @@ from .core.engine import DecisionEngine
 from .core.registry import ToolRegistry
 from .core.safety import SafetyPolicy
 from .core.sessions import SessionStore
+from .tools.execution import ExecutionServiceAdapter
 from .tools.local import (
     MediaOpenTool,
     NoteReadTool,
@@ -35,8 +36,21 @@ DEFAULT_WORKSPACE = Path(
 ).resolve()
 
 
-def build_registry(workspace: Path | str | None = None) -> ToolRegistry:
-    """Register the adapters that ship with the core."""
+def build_registry(
+    workspace: Path | str | None = None,
+    execution_url: str | None = None,
+) -> ToolRegistry:
+    """Register the adapters that ship with the core.
+
+    The execution service adapter (Agent 2) is *declared* rather than
+    registered when no execution service is configured, so the capability is
+    visible to the model and the UI while calling it fails honestly with
+    ``tool_unavailable`` instead of pretending to work.
+
+    ``execution_url`` overrides the ``SIDEKICK_EXECUTION_URL`` environment
+    variable, which is how a deployment (or a test) points the core at a
+    specific execution service.
+    """
     root = Path(workspace or DEFAULT_WORKSPACE).resolve()
     registry = ToolRegistry()
     timer_tool = TimerSetTool()
@@ -45,6 +59,11 @@ def build_registry(workspace: Path | str | None = None) -> ToolRegistry:
     registry.register(timer_tool)
     registry.register(TimerListTool(timer_tool))
     registry.register(MediaOpenTool())
+    execution = ExecutionServiceAdapter(execution_url)
+    if execution.configured:
+        registry.register(execution)
+    else:
+        registry.declare(execution.spec)
     return registry
 
 
