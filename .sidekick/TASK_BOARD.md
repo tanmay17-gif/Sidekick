@@ -25,7 +25,7 @@ A task is not `MERGED` until the real merge commit exists on the remote base. A 
 | A2-AUDIT | 0 | Read-only execution/integration prerequisites inventory | Agent 2 | IN_REVIEW | — | Inventory delivered in `docs/execution-prerequisites-audit.md` (branch `agent2/execution-foundation`, PR #4). Evidence: git 2.55, Python 3.14.8, no Node, no container runtime, no `gh`, GitHub API + push auth working. |
 | A3-AUDIT | 0 | Read-only UI/voice/media prerequisites inventory | Agent 3 | READY | — | Inventory of voice/UI/media prerequisites |
 | A4-RULES | 0 | Verify current official hackathon rules; start test/CI plan | Agent 4 | READY | — | Source URLs, date checked, requirement text saved in repo |
-| A2-EXEC | 2 | Real execution + integration adapters | Agent 2 | IN_REVIEW | A1-CONTRACT | `coding.execute` is registered against `ToolAdapter` (`sidekick/tools/execution.py`); with no execution service configured the capability is *declared* instead of registered, so calling it fails with an honest `tool_unavailable`. Real edits, real `git diff`, real test exit codes and honest failure/cancellation are verified end to end through the core (branch `agent2/execution-foundation`, PR #4). Real-model acceptance is still blocked on a credential. |
+| A2-EXEC | 2 | Real execution + integration adapters | Agent 2 | IN_REVIEW | A1-CONTRACT | `coding.execute` is registered against `ToolAdapter` (`sidekick/tools/execution.py`); with no execution service configured the capability is *declared* instead of registered, so calling it fails with an honest `tool_unavailable`. Real edits, real `git diff`, real test exit codes and honest failure/cancellation are verified end to end through the core (branch `agent2/execution-foundation`, PR #4). Production-readiness milestone: three defects found and fixed (an invalid git option that made the tracked-file diff silently empty, a link/junction escape from the workspace, and `git apply --unsafe-paths`); durable jobs with a persisted event log, event resume after a restart, idempotent submission and retention; an unambiguous outcome contract (`proposed_edits` vs `applied_files`, `diff_state`); a live-provider acceptance procedure (`scripts/live_provider_acceptance.py`); readiness report and sandbox threat model. `python -m pytest`: 320 passed, 1 skipped. Real-model acceptance is still blocked on a credential. |
 | A3-UI | 3 | Design system + real voice/UI foundations | Agent 3 | BACKLOG | A1-CONTRACT | The slice page in `sidekick/api/static/index.html` is a placeholder for this |
 | A4-CI | 2 | CI, contract tests, merge gate | Agent 4 | BACKLOG | A1-CONTRACT | The test command is `python -m pytest` (no network, no model weights needed) |
 
@@ -46,9 +46,22 @@ that no agent can supply on their own:
   live-provider acceptance test is *skipped with a reason* rather than
   passing against a fixture.
 
-After that: restart/reconnect reliability for long jobs, and a real music
-provider integration if a legally supported and genuinely configurable
-provider becomes available.
+Restart/reconnect reliability for long jobs is **done** (durable job state,
+a persisted event log, resume with `?after=<seq>` across a restart,
+idempotent submission, retention) - see `docs/EXECUTION_READINESS.md`.
+
+The remaining Agent 2 work needs one thing that no agent can supply on
+their own:
+
+- **A coding provider credential.** `python scripts/live_provider_acceptance.py`
+  is the reproducible acceptance procedure; it exits `2` (BLOCKED) with the
+  exact setup until a key or an authorized coding CLI exists. It never
+  reports a pass for the simulated substitute.
+
+After that: a real music provider integration - only if a lawfully supported
+and genuinely configurable provider becomes available. Local media control
+(real multimedia keys, real volume) is already implemented and is labelled
+as local machine control, not as a streaming-service integration.
 
 ## Open gaps (Agent 1, after the A1-CONTRACT merge)
 
