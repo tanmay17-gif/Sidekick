@@ -274,6 +274,19 @@ const server = createServer(async (request, response) => {
     return
   }
 
+  if (url.pathname === '/api/v1/media/catalog' && request.method === 'GET') {
+    // The media catalog is optional. The client falls back to the film it
+    // ships with, so a 404 here is a supported configuration.
+    sendJson(response, 404, {
+      error: {
+        code: 'not_found',
+        message: 'The dev stub does not publish a media catalog.',
+        retryable: false,
+      },
+    })
+    return
+  }
+
   if (url.pathname === '/api/v1/requests' && request.method === 'POST') {
     const body = await readBody(request)
     const sessionId =

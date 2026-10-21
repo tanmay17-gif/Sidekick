@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import type { MediaAsset } from '@/lib/api/types'
-import { loadDefaultMedia } from '@/lib/media/catalog'
+import { loadMediaCatalog } from '@/lib/media/catalog'
 import { understandingLabel } from '@/lib/media/companion'
 import { useMovieCompanion, type CompanionMode } from '@/lib/media/useMovieCompanion'
 import { formatClock } from '@/lib/media/subtitles'
@@ -17,24 +17,28 @@ const MODES: Array<{ id: CompanionMode; label: string; hint: string }> = [
 export interface MovieCompanionProps {
   speaker: Speaker
   speechEnabled: boolean
+  /** Backend media catalog endpoint, when the backend offers one. */
+  catalogUrl?: string | null
 }
 
-export function MovieCompanion({ speaker, speechEnabled }: MovieCompanionProps) {
+export function MovieCompanion({ speaker, speechEnabled, catalogUrl }: MovieCompanionProps) {
   const [asset, setAsset] = useState<MediaAsset | null>(null)
   const [warnings, setWarnings] = useState<string[]>([])
+  const [source, setSource] = useState<'backend' | 'bundled'>('bundled')
   const [mode, setMode] = useState<CompanionMode>('cards')
 
   useEffect(() => {
     let cancelled = false
-    void loadDefaultMedia().then((result) => {
+    void loadMediaCatalog({ catalogUrl }).then((result) => {
       if (cancelled) return
       setAsset(result.asset)
       setWarnings(result.warnings)
+      setSource(result.source)
     })
     return () => {
       cancelled = true
     }
-  }, [])
+  }, [catalogUrl])
 
   if (!asset) {
     return (
@@ -54,6 +58,7 @@ export function MovieCompanion({ speaker, speechEnabled }: MovieCompanionProps) 
       mode={mode}
       onModeChange={setMode}
       warnings={warnings}
+      source={source}
     />
   )
 }
@@ -65,6 +70,7 @@ function MovieStage({
   mode,
   onModeChange,
   warnings,
+  source,
 }: {
   asset: MediaAsset
   speaker: Speaker
@@ -72,6 +78,7 @@ function MovieStage({
   mode: CompanionMode
   onModeChange: (mode: CompanionMode) => void
   warnings: string[]
+  source: 'backend' | 'bundled'
 }) {
   const movie = useMovieCompanion({ asset, speaker, speechEnabled, mode })
   const { state } = movie
@@ -204,6 +211,12 @@ function MovieStage({
 
           <Panel title="Source" hint="Openly licensed media shipped with the app">
             <dl className="stack stack--tight" style={{ fontSize: 'var(--text-sm)' }}>
+              <div className="row">
+                <dt style={{ color: 'var(--ink-muted)', minWidth: 92 }}>Catalog</dt>
+                <dd style={{ margin: 0 }}>
+                  {source === 'backend' ? 'backend catalog' : 'bundled with the app'}
+                </dd>
+              </div>
               <div className="row">
                 <dt style={{ color: 'var(--ink-muted)', minWidth: 92 }}>Title</dt>
                 <dd style={{ margin: 0 }}>{asset.title}</dd>

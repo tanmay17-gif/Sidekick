@@ -155,7 +155,11 @@ export function App() {
                 title="Watch together"
                 lede="Real playback with the film's official subtitle track. Companion events fire on real media time."
               />
-              <MovieCompanion speaker={speaker} speechEnabled={sidekick.speakEnabled} />
+              <MovieCompanion
+                speaker={speaker}
+                speechEnabled={sidekick.speakEnabled}
+                catalogUrl={sidekick.mediaCatalogPath}
+              />
             </>
           ) : null}
 
@@ -277,9 +281,14 @@ function TalkSurface({
       ) : null}
 
       {busy ? (
-        <p className="hint" role="status" style={{ marginTop: 'var(--space-4)' }}>
-          Resolving the request with the backend...
-        </p>
+        <div className="row" style={{ marginTop: 'var(--space-4)', gap: 'var(--space-3)' }}>
+          <p className="hint" role="status" style={{ margin: 0 }}>
+            Resolving the request with the backend...
+          </p>
+          <button type="button" className="btn btn--sm" onClick={sidekick.cancel}>
+            Cancel request
+          </button>
+        </div>
       ) : null}
     </>
   )

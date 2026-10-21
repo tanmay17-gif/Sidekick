@@ -136,6 +136,45 @@ describe('Sidekick app integration', () => {
     })
   })
 
+  it('lets the user cancel a request that is still in flight', async () => {
+    const user = userEvent.setup()
+    let release: (() => void) | undefined
+    const pending = new Promise<void>((resolve) => {
+      release = resolve
+    })
+
+    installFetch((url) => {
+      if (url.includes('/capabilities')) {
+        return new Response(JSON.stringify(capabilities), {
+          headers: { 'content-type': 'application/json' },
+        })
+      }
+      // A request that never answers on its own.
+      return pending.then(
+        () =>
+          new Response(JSON.stringify(response()), {
+            headers: { 'content-type': 'application/json' },
+          }),
+      )
+    })
+
+    render(<App />)
+    await waitFor(() => expect(screen.getByText('music.play')).toBeInTheDocument())
+
+    await user.type(screen.getByLabelText('Your request'), 'play something')
+    await user.click(screen.getByRole('button', { name: 'Send' }))
+
+    const cancel = await screen.findByRole('button', { name: 'Cancel request' })
+    expect(cancel).toBeInTheDocument()
+    await user.click(cancel)
+
+    // The composer is usable again and no result was invented.
+    await waitFor(() => {
+      expect(screen.queryByRole('button', { name: 'Cancel request' })).not.toBeInTheDocument()
+    })
+    release?.()
+  })
+
   it('renders a clarification with selectable options', async () => {
     const user = userEvent.setup()
     installFetch((url) =>

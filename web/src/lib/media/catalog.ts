@@ -1,4 +1,4 @@
-import type { MediaAsset } from '@/lib/api/types'
+import type { CompanionRule, MediaAsset, MediaCue } from '@/lib/api/types'
 import { parseSubtitles } from './subtitles'
 
 /**
@@ -52,21 +52,85 @@ export interface LoadCatalogResult {
   asset: MediaAsset
   /** Non-fatal problems (e.g. subtitle file could not be fetched). */
   warnings: string[]
+  /** Where the catalog came from. */
+  source: 'backend' | 'bundled'
+}
+
+export interface BackendCatalogEntry {
+  id: string
+  title: string
+  credit?: string
+  license?: string
+  src: string
+  mime_type?: string
+  subtitle_src: string
+  subtitle_label?: string
+  companion_rules?: CompanionRule[]
+}
+
+interface BackendCatalogResponse {
+  assets?: BackendCatalogEntry[]
 }
 
 /**
- * Load the shipped media descriptor and its subtitle cues.
- * A subtitle failure is reported, never silently ignored - without cues the
- * companion cannot claim to understand anything.
+ * Load the catalog, preferring a backend-provided one and falling back to the
+ * film shipped in the repository.
+ *
+ * The backend entry is only used when its media and subtitle actually load -
+ * a half-working catalog entry must not replace a working local one.
  */
-export async function loadDefaultMedia(
-  fetchImpl: typeof fetch = globalThis.fetch.bind(globalThis),
+export async function loadMediaCatalog(
+  options: {
+    catalogUrl?: string | null
+    fetchImpl?: typeof fetch
+  } = {},
 ): Promise<LoadCatalogResult> {
+  const fetchImpl = options.fetchImpl ?? globalThis.fetch.bind(globalThis)
   const warnings: string[] = []
-  let cues = DEFAULT_MEDIA.cues
+
+  if (options.catalogUrl) {
+    try {
+      const response = await fetchImpl(options.catalogUrl)
+      if (response.ok) {
+        const payload = (await response.json()) as BackendCatalogResponse
+        const entry = payload.assets?.[0]
+        if (entry) {
+          const result = await hydrate({ ...DEFAULT_MEDIA, ...entry, cues: [] }, fetchImpl, warnings)
+          if (result.cues.length > 0) {
+            return { asset: result.asset, warnings, source: 'backend' }
+          }
+          warnings.push(
+            'The backend catalog entry had no readable subtitle track, so the bundled film was used instead.',
+          )
+        }
+      } else if (response.status !== 404) {
+        // 404 simply means the backend does not offer a catalog - that is a
+        // supported configuration, not a problem worth shouting about.
+        warnings.push(
+          `Backend media catalog returned HTTP ${response.status}. Using the bundled film.`,
+        )
+      }
+    } catch (cause) {
+      warnings.push(
+        `Backend media catalog unavailable (${cause instanceof Error ? cause.message : 'unknown error'}); using the bundled film.`,
+      )
+    }
+  }
+
+  const result = await hydrate(DEFAULT_MEDIA, fetchImpl, warnings)
+  return { asset: result.asset, warnings, source: 'bundled' }
+}
+
+/** Load the subtitle track for an asset and parse it into real cues. */
+async function hydrate(
+  asset: MediaAsset,
+  fetchImpl: typeof fetch,
+  warnings: string[],
+): Promise<{ asset: MediaAsset; cues: MediaCue[] }> {
+  let cues = asset.cues
 
   try {
-    const response = await fetchImpl(DEFAULT_MEDIA.subtitle_src)
+    const response = await fetchImpl(asset.subtitle_src)
     if (!response.ok) {
       warnings.push(
         `Subtitle track could not be loaded (HTTP ${response.status}). Companion events are disabled.`,
@@ -85,5 +149,18 @@ export async function loadDefaultMedia(
     )
   }
 
-  return { asset: { ...DEFAULT_MEDIA, cues }, warnings }
+  return { asset: { ...asset, cues }, cues }
+}
+
+/**
+ * Load the shipped media descriptor and its subtitle cues.
+ * A subtitle failure is reported, never silently ignored - without cues the
+ * companion cannot claim to understand anything.
+ */
+export async function loadDefaultMedia(
+  fetchImpl: typeof fetch = globalThis.fetch.bind(globalThis),
+): Promise<LoadCatalogResult> {
+  const warnings: string[] = []
+  const result = await hydrate(DEFAULT_MEDIA, fetchImpl, warnings)
+  return { asset: result.asset, warnings, source: 'bundled' }
 }
