@@ -117,6 +117,16 @@ Open **Games**: the list comes from the backend. With the stub, chess is
 `simulated` and the board renders the position the backend reports - the
 browser never decides a move.
 
+Below it, **Local activities** holds the games that ship with the client and
+need no service at all:
+
+- **Tic-Tac-Toe** - the opponent is a real minimax search over the rules, not
+  a random pick. Play a few moves and it will block you and take its chances.
+- **2048** - the real merge rules; two equal tiles combine once per move.
+
+Both are marked `local`, so a viewer can tell at a glance what runs on the
+device and what runs on a server.
+
 ## 8. Interruption (10 seconds)
 
 Ask something and let Sidekick start answering. Press the microphone button

@@ -19,7 +19,23 @@ defined in `.sidekick/TEAM_PLAYBOOK.md` §8.
 | Coding job execution and diff | `REAL_BUT_UNVERIFIED` | The client renders the real diff from the response payload (including unified-diff line colouring). The job itself is Agent 2's. |
 | Music providers | `NOT_CONFIGURED` | No provider credentials exist. The UI shows the provider list with `unconfigured` state and explains what is needed. |
 | Chess | `REAL_BUT_UNVERIFIED` | The board is rendered from the FEN the backend reports; move legality is never decided in the browser. |
+| Tic-Tac-Toe (local) | `REAL_AND_VERIFIED` | The opponent is a real minimax search over the rules in `web/src/lib/games/tictactoe.ts`. It is labelled `local` so it is never confused with a backend-backed game. |
+| 2048 (local) | `REAL_AND_VERIFIED` | The real merge rules in `web/src/lib/games/game2048.ts`. A tile merges once per move, exactly as in 2048. |
 | Alexa+ | `NOT_IMPLEMENTED` | No Alexa skill is implemented. The browser uses the Web Speech API, which is **not** an Alexa+ integration and must not be presented as one. |
+
+### Games are not just chess
+
+The games surface has two clearly separated groups:
+
+- **Backend games** - whatever the backend reports through
+  `capabilities.games`, with the state it reported. The browser only renders
+  them and never decides a move.
+- **Local activities** - games that ship with the client and need no service at
+  all. Their rules, opponent and state are real and run in the browser, and
+  they are marked `local` so nobody mistakes them for a service response.
+
+`web/src/lib/games/registry.ts` is the single place to add another local
+activity.
 
 ## Voice input - real behaviour and limits
 
