@@ -167,7 +167,11 @@ test('plays 2048 locally with the real merge rules', async ({ page }) => {
   await page.locator('.activity__summary').nth(1).click()
 
   const before = await page.locator('.tiles__cell').allTextContents()
-  await page.getByRole('button', { name: 'left', exact: true }).click()
+  // A single direction can legitimately be a no-op, so every direction is
+  // tried before the board is compared.
+  for (const direction of ['left', 'up', 'right', 'down']) {
+    await page.getByRole('button', { name: direction, exact: true }).click()
+  }
   const after = await page.locator('.tiles__cell').allTextContents()
 
   expect(after).not.toEqual(before)
