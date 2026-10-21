@@ -47,6 +47,13 @@ class Workspace:
     def resolve_child(self, relative: str) -> Path:
         """Resolve ``relative`` inside this workspace or raise.
 
+        Containment is checked **twice**: once lexically, and once against
+        the *real* path. The second check is what stops a junction (Windows)
+        or a symbolic link (POSIX) inside the workspace from redirecting a
+        write to a location outside it - a purely lexical check would let
+        ``linked/victim.txt`` escape even though the text of the path looks
+        contained.
+
         Raises:
             SidekickError: ``edit_outside_workspace`` when the resolved path
                 escapes the workspace root.
@@ -61,8 +68,7 @@ class Workspace:
             resolved = Path(os.path.normpath(str(candidate)))
         else:
             resolved = Path(os.path.normpath(str(self.root / candidate)))
-        # normpath collapses "..", but a Windows drive-relative path or a
-        # different drive would still escape -- check containment explicitly.
+        # First check: the path as written must not point outside.
         try:
             resolved.relative_to(self.root)
         except ValueError:
@@ -71,7 +77,29 @@ class Workspace:
                 f"Path {relative!r} resolves outside the authorized workspace.",
                 details={"path": relative},
             ) from None
-        return resolved
+        # Second check: follow links and junctions and check again. The
+        # workspace root is already resolved, so the comparison is against
+        # the real location of the workspace.
+        try:
+            real = resolved.resolve(strict=False)
+        except OSError as exc:  # pragma: no cover - unreadable path
+            raise SidekickError(
+                errors.EDIT_OUTSIDE_WORKSPACE,
+                f"Path {relative!r} could not be resolved safely: {exc.strerror or exc}",
+                details={"path": relative},
+            ) from None
+        try:
+            real.relative_to(self.root)
+        except ValueError:
+            raise SidekickError(
+                errors.EDIT_OUTSIDE_WORKSPACE,
+                (
+                    f"Path {relative!r} points outside the authorized workspace "
+                    "through a link or junction."
+                ),
+                details={"path": relative, "resolved": str(real)},
+            ) from None
+        return real
 
 
 class WorkspacePolicy:

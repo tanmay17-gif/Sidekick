@@ -50,6 +50,9 @@ class DiffResult:
     changed_files: List[FileChange] = field(default_factory=list)
     truncated: bool = False
     head_sha: Optional[str] = None
+    #: False when the workspace is not a repository, so there is no diff to
+    #: report. A missing diff is never reported as "no changes".
+    available: bool = True
 
     def to_dict(self) -> Dict[str, object]:
         return {
@@ -57,6 +60,7 @@ class DiffResult:
             "changed_files": [c.to_dict() for c in self.changed_files],
             "truncated": self.truncated,
             "head_sha": self.head_sha,
+            "available": self.available,
             "file_count": len(self.changed_files),
         }
 
@@ -75,6 +79,25 @@ class GitWorkspace:
             raise SidekickError(
                 errors.VCS_ERROR,
                 f"git {' '.join(args)} failed with exit code {result.exit_code}.",
+                details={
+                    "argv": list(args),
+                    "exit_code": result.exit_code,
+                    "stderr": result.stderr[-2000:],
+                },
+            )
+        return result.stdout
+
+    def _git_checked(self, args: Sequence[str], what: str) -> str:
+        """Run a git command and fail loudly.
+
+        A git command that fails must never look like "there was nothing to
+        report": an empty diff because the command was rejected is a lie.
+        """
+        result = self.runner.run(["git", *args], cwd=self.root, timeout=60)
+        if result.exit_code != 0:
+            raise SidekickError(
+                errors.VCS_ERROR,
+                f"git {' '.join(args)} failed while {what}.",
                 details={
                     "argv": list(args),
                     "exit_code": result.exit_code,
@@ -145,7 +168,12 @@ class GitWorkspace:
         truncated = False
         total = 0
 
-        tracked = self._git(["diff", "--no-color", "--no-ext-diff", "--binary=false"], check=False)
+        # The tracked modifications. ``git diff`` compares the working tree
+        # with the index, so this is the real patch for every tracked file
+        # that was modified, added to the index or deleted.
+        tracked = self._git_checked(
+            ["diff", "--no-color", "--no-ext-diff"], "capturing the tracked diff"
+        )
         if tracked:
             total += len(tracked)
             parts.append(tracked)
@@ -191,9 +219,19 @@ class GitWorkspace:
             timeout=60,
         )
         # `git diff --no-index` exits 1 when the files differ; that is success
-        # for our purposes.
+        # for our purposes. Any other exit code means the patch could not be
+        # produced, and the file is reported as changed without a patch
+        # rather than being silently dropped.
         if result.exit_code not in (0, 1):
-            return ""
+            raise SidekickError(
+                errors.VCS_ERROR,
+                f"Could not produce a diff for the untracked file {rel!r}.",
+                details={
+                    "path": rel,
+                    "exit_code": result.exit_code,
+                    "stderr": result.stderr[-2000:],
+                },
+            )
         return result.stdout
 
     def changed_files(self) -> List[str]:

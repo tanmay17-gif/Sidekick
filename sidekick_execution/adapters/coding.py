@@ -95,9 +95,27 @@ class CodingActionRequest:
         )
 
 
+#: What the diff says about the workspace.
+DIFF_CHANGES = "changes"        # the workspace really differs from HEAD
+DIFF_NO_CHANGES = "no_changes"  # the workspace is identical to HEAD
+DIFF_UNAVAILABLE = "unavailable"  # the workspace is not a repository
+
+
 @dataclass
 class CodingActionOutcome:
-    """What actually happened."""
+    """What actually happened.
+
+    The fields are deliberately explicit so that a caller cannot confuse
+    *proposed* with *applied*, *no changes* with *a clean diff*, and a
+    *failure* with a *success*:
+
+    * ``proposed_edits`` - what the provider asked for.
+    * ``applied_files`` - what was really written.
+    * ``changed_files`` - what Git says differs from HEAD.
+    * ``diff_state`` - whether there is a diff at all.
+    * ``test_result`` - the real command and its real exit code.
+    * ``outcome`` - ``succeeded`` | ``partial`` | ``failed`` | ``cancelled``.
+    """
 
     status: str
     outcome: str  # succeeded | partial | failed | cancelled
@@ -106,10 +124,15 @@ class CodingActionOutcome:
     changed_files: List[Dict[str, str]] = field(default_factory=list)
     diff: str = ""
     diff_truncated: bool = False
+    diff_state: str = DIFF_UNAVAILABLE
     head_sha: Optional[str] = None
     test_result: Optional[TestRunResult] = None
     provider: Dict[str, Any] = field(default_factory=dict)
     error: Optional[SidekickError] = None
+    #: What the provider proposed, before anything was written.
+    proposed_edits: List[Dict[str, Any]] = field(default_factory=list)
+    #: The files that were really written.
+    applied_files: List[str] = field(default_factory=list)
 
     def to_dict(self) -> Dict[str, Any]:
         payload: Dict[str, Any] = {
@@ -119,9 +142,12 @@ class CodingActionOutcome:
             "changed_files": list(self.changed_files),
             "diff": self.diff,
             "diff_truncated": self.diff_truncated,
+            "diff_state": self.diff_state,
             "head_sha": self.head_sha,
             "provider": dict(self.provider),
             "test_result": self.test_result.to_dict() if self.test_result else None,
+            "proposed_edits": list(self.proposed_edits),
+            "applied_files": list(self.applied_files),
         }
         if self.error:
             payload["error"] = self.error.to_dict()["error"]
@@ -177,10 +203,17 @@ class CodingAdapter:
                 test_command=request.test_command,
             )
         )
+        # The level is what the provider itself declared for this call. A
+        # provider that is the simulated substitute must never be reported as
+        # a real model, and a provider that declares itself unavailable must
+        # not be reported as real either.
+        declared_level = provider_result.status.level or self.provider.level
+        if declared_level == ClaimLevel.UNAVAILABLE:
+            declared_level = self.provider.level
         provider_meta = {
             "name": self.provider.name,
-            "level": self.provider.level,
-            "simulated": self.provider.level == ClaimLevel.SIMULATED,
+            "level": declared_level,
+            "simulated": declared_level == ClaimLevel.SIMULATED,
             "available": provider_result.status.available,
             "reason": provider_result.status.reason,
             "latency_ms": provider_result.latency_ms,
@@ -202,6 +235,7 @@ class CodingAdapter:
 
         plan = provider_result.plan
         assert plan is not None
+        proposed_edits = [edit.to_dict() for edit in plan.edits]
         if not plan.edits:
             error = SidekickError(
                 errors.NO_CHANGES_PRODUCED,
@@ -222,6 +256,7 @@ class CodingAdapter:
             return self._cancelled_outcome(workspace, provider_meta)
 
         applied, apply_error = self._apply_plan(workspace, plan)
+        applied_files = list(applied)
         if apply_error is not None:
             emit("error", apply_error.message, {"code": apply_error.code})
             return CodingActionOutcome(
@@ -231,6 +266,8 @@ class CodingAdapter:
                 workspace=workspace.path,
                 provider=provider_meta,
                 error=apply_error,
+                proposed_edits=proposed_edits,
+                applied_files=applied_files,
             )
         emit(
             "progress",
@@ -265,10 +302,16 @@ class CodingAdapter:
         # The diff is captured *after* the test run so that it reflects the
         # resulting workspace state exactly, as the contract promises.
         diff_result = self._capture_diff(workspace)
+        if not diff_result.available:
+            diff_state = DIFF_UNAVAILABLE
+        elif diff_result.changed_files:
+            diff_state = DIFF_CHANGES
+        else:
+            diff_state = DIFF_NO_CHANGES
         emit(
             "progress",
             f"Captured a real diff covering {len(diff_result.changed_files)} file(s).",
-            {"file_count": len(diff_result.changed_files)},
+            {"file_count": len(diff_result.changed_files), "diff_state": diff_state},
         )
 
         if cancel.is_set():
@@ -292,10 +335,13 @@ class CodingAdapter:
                 changed_files=changed,
                 diff=diff_result.diff,
                 diff_truncated=diff_result.truncated,
+                diff_state=diff_state,
                 head_sha=diff_result.head_sha,
                 test_result=test_result,
                 provider=provider_meta,
                 error=error,
+                proposed_edits=proposed_edits,
+                applied_files=applied_files,
             )
 
         if test_result is not None and not test_result.passed:
@@ -319,10 +365,13 @@ class CodingAdapter:
                 changed_files=changed,
                 diff=diff_result.diff,
                 diff_truncated=diff_result.truncated,
+                diff_state=diff_state,
                 head_sha=diff_result.head_sha,
                 test_result=test_result,
                 provider=provider_meta,
                 error=error,
+                proposed_edits=proposed_edits,
+                applied_files=applied_files,
             )
 
         summary = plan.summary or f"Applied {len(applied)} change(s) to the workspace."
@@ -335,9 +384,12 @@ class CodingAdapter:
             changed_files=changed,
             diff=diff_result.diff,
             diff_truncated=diff_result.truncated,
+            diff_state=diff_state,
             head_sha=diff_result.head_sha,
             test_result=test_result,
             provider=provider_meta,
+            proposed_edits=proposed_edits,
+            applied_files=applied_files,
         )
 
     # -- internals ---------------------------------------------------------
@@ -404,7 +456,7 @@ class CodingAdapter:
             with os.fdopen(handle, "w", encoding="utf-8", newline="\n") as fh:
                 fh.write(patch)
             result = self.runner.run(
-                ["git", "apply", "--whitespace=nowarn", "--unsafe-paths", temp_path],
+                ["git", "apply", "--whitespace=nowarn", temp_path],
                 cwd=workspace.root,
                 timeout=60,
             )
@@ -429,7 +481,15 @@ class CodingAdapter:
             return git.diff()
         except SidekickError as exc:
             if exc.code == errors.VCS_NOT_A_REPOSITORY:
-                return DiffResult(diff="", changed_files=[], truncated=False, head_sha=None)
+                # There is no diff to report - which is not the same as
+                # "no changes". The distinction is carried in `available`.
+                return DiffResult(
+                    diff="",
+                    changed_files=[],
+                    truncated=False,
+                    head_sha=None,
+                    available=False,
+                )
             raise
 
     def _cancelled_outcome(
