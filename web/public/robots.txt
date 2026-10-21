@@ -1,0 +1,3 @@
+# Sidekick is an application, not a public content site.
+User-agent: *
+Disallow: /

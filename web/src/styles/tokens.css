@@ -21,9 +21,9 @@
 
   /* Ink --------------------------------------------------------- */
   --ink: #e9edf3;
-  --ink-secondary: #a7b1c0;
-  --ink-muted: #6f7a8a;
-  --ink-faint: #4b5462;
+  --ink-secondary: #b3bdc9;
+  --ink-muted: #8b95a4;
+  --ink-faint: #798494;
 
   /* Accent (single hue, used for focus + primary action) -------- */
   --accent: #63d2c4;

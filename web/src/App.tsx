@@ -52,7 +52,10 @@ export function App() {
     if (!text || spokenRef.current === turn.id) return
     spokenRef.current = turn.id
     void speaker.speak(text, {
-      onStart: () => setSpeaking(true),
+      onStart: () => {
+        setSpeaking(true)
+        setSpeechNotice(null)
+      },
       onEnd: () => setSpeaking(false),
       onError: (message) => {
         setSpeaking(false)

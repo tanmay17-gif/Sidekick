@@ -543,7 +543,7 @@
 }
 
 .badge--unavailable {
-  color: var(--ink-faint);
+  color: var(--ink-muted);
 }
 
 .badge--unconfigured {
