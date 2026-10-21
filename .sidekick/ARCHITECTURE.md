@@ -61,3 +61,61 @@ Sidekick is a voice-first, context-aware action companion. It understands evolvi
 - A correction changes an unexecuted plan before execution.
 - For an in-flight action, the correction cancels/supersedes it where the adapter supports cancellation; otherwise stop/compensate safely and explain.
 - A confirmation must bind to the exact pending action and expire if the plan changes.
+
+## Implementation notes (Phase 1, Agent 1)
+
+These are the decisions the implementation actually makes. They refine the principles above; they do
+not replace them.
+
+### The capability catalog is the vocabulary
+
+`sidekick/core/catalog.py` holds the descriptions of every capability (aliases, arguments, risk,
+destinations). It is the single source of truth and it is *data*:
+
+- the decision model's answer space is generated from it (a new capability needs no retraining),
+- the deterministic fallback matches the aliases in it (adding a capability makes it recognisable
+  without touching the brain),
+- the safety policy reads the risk and approval rules from it,
+- the UI reads it through `GET /v1/tools`.
+
+No keyword list lives inside the engine.
+
+### Who decides what
+
+| Question | Decided by | Why |
+|---|---|---|
+| Which capability? | the decision model (Laya), with the deterministic matcher as a second opinion | the model is calibrated and general |
+| Which service/destination? | the model, but only above a confidence floor; the catalog matcher otherwise | the model answers destinations with 100% accuracy when it is sure and guesses when it is not |
+| Is this a correction? | the deterministic discourse markers, plus the model's `is_correction` signal | measured: the model scored 0.03 on a clear correction, the markers are reliable |
+| Is this a control verb (cancel, pause, resume)? | the deterministic control grammar only | measured: with control intents in the answer space the model picked a control more often than the right capability |
+| How many actions? | the deterministic segmentation | splitting must never lose a segment; the model has no reliable multi-action signal |
+| Is it safe, does it need approval, are the arguments valid? | the deterministic safety policy | the model can never grant itself permission |
+
+The rule is simple: **the model interprets, the deterministic layers decide.** Every deterministic
+override is visible in the response (`decision_model.fallback_used` plus the reason).
+
+### Corrections are resolved before the model sees the text
+
+A correction marker splits the segment into *preceding* (superseded) and *residue* (authoritative).
+The model only interprets the residue, so the stale destination can never reach an action. Measured
+against the real model: on "Open YouTube, no wait, open Spotify" the model picked YouTube; on the
+residue alone it picks Spotify, which is the correct answer.
+
+### Argument binding
+
+Arguments come from the segment (catalog enum values, durations, counts, quoted or named text, or the
+text that follows the tool alias), then from the session (the same tool's previous arguments), then
+from a clarification question. The order matters: an explicit value in the utterance always wins over
+the remembered one.
+
+### Async actions
+
+An adapter may return `ToolResult(ongoing=True)`. The action then stays `running` and the adapter
+reports the final outcome through `ToolContext.complete()`. This is how a real timer behaves: the
+action is genuinely in flight and can genuinely be cancelled.
+
+### Session state
+
+`sidekick/core/sessions.py` keeps one `SessionState` per session id, guarded by a lock, with an idle
+TTL, a maximum number of sessions (LRU eviction) and per-session limits on actions, tasks and cached
+responses. Actions are stored exactly once; tasks reference them by id.
