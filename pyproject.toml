@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "sidekick-execution"
+version = "0.1.0"
+description = "Real task execution for Sidekick: coding agent, safe workspace operations, job lifecycle, truthful adapters."
+readme = "sidekick_execution/README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+dependencies = []
+
+[project.scripts]
+sidekick-execution = "sidekick_execution.__main__:main"
+
+[tool.setuptools]
+packages = ["sidekick_execution", "sidekick_execution.adapters", "sidekick_execution.providers"]
+
+# NOTE (Agent 2): this file exists so the execution service can be installed
+# and run. Agent 1 owns the project-wide build configuration -- extend this
+# file rather than replacing it, and keep the dependency list empty unless a
+# dependency is genuinely required on every teammate's machine.
