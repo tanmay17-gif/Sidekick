@@ -1,10 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import type { MediaAsset } from '@/lib/api/types'
+import type { MediaAsset, MediaCue } from '@/lib/api/types'
 import { loadMediaLibrary } from '@/lib/media/catalog'
+import { parseSubtitles } from '@/lib/media/subtitles'
 import { useMovieBuddy } from '@/lib/media/useMovieBuddy'
 import { formatClock } from '@/lib/media/subtitles'
 import { BUDDY_CAPABILITY_NOTE } from '@/lib/movie/commands'
 import { NOOP_BUDDY_CONTROLLER, type BuddyController } from '@/lib/movie/controller'
+import type { CommentaryProvider } from '@/lib/movie/provider'
 import type { Speaker } from '@/lib/voice/synthesis'
 import { Companion } from './Companion'
 import { FilmIcon } from './icons'
@@ -16,8 +18,9 @@ export interface MovieBuddyProps {
   /** True when the buddy should start switched on (a voice command did it). */
   startActive?: boolean
   onSay?: (text: string) => void
-  /** The app registers the controller so voice commands can drive the player. */
   controllerRef?: React.MutableRefObject<BuddyController>
+  /** Overrides the commentary provider - used by the tests. */
+  provider?: CommentaryProvider
 }
 
 export function MovieBuddy({
@@ -26,13 +29,16 @@ export function MovieBuddy({
   startActive,
   onSay,
   controllerRef,
+  provider,
 }: MovieBuddyProps) {
   const [assets, setAssets] = useState<MediaAsset[]>([])
   const [assetId, setAssetId] = useState<string | null>(null)
   const [warnings, setWarnings] = useState<string[]>([])
   const [loading, setLoading] = useState(true)
   const [showWhy, setShowWhy] = useState(false)
+  const [subtitleNotice, setSubtitleNotice] = useState<string | null>(null)
   const fileInputRef = useRef<HTMLInputElement | null>(null)
+  const subtitleInputRef = useRef<HTMLInputElement | null>(null)
 
   useEffect(() => {
     let cancelled = false
@@ -53,18 +59,14 @@ export function MovieBuddy({
     [assets, assetId],
   )
 
-  const buddy = useMovieBuddy({ asset, speaker, speechEnabled, onSay })
+  const buddy = useMovieBuddy({ asset, speaker, speechEnabled, onSay, provider })
 
-  // The native caption track stays attached for assistive technology and the
-  // player's own caption menu, but hidden so it does not double up with the
-  // app's styled captions.
-  const trackElementRef = useRef<HTMLTrackElement | null>(null)
+  // A voice command can switch the buddy on before a film is chosen.
   useEffect(() => {
-    const track = trackElementRef.current
-    if (track?.track && track.track.mode !== 'hidden') track.track.mode = 'hidden'
-  }, [buddy.trackUrl, asset?.id])
+    if (startActive) buddy.activate()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [startActive])
 
-  // Register the controller so the talk surface can drive this one.
   useEffect(() => {
     const controller: BuddyController = {
       activate: () => buddy.activate(),
@@ -92,30 +94,43 @@ export function MovieBuddy({
     }
   }, [buddy, controllerRef])
 
-  // A voice command can switch the buddy on before a film is chosen.
-  useEffect(() => {
-    if (startActive) buddy.activate()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [startActive])
-
-  const onPickFile = (file: File | undefined) => {
+  const onPickVideo = (file: File | undefined) => {
     if (!file) return
     const url = URL.createObjectURL(file)
     const custom: MediaAsset = {
-      id: `custom-${file.name}`,
+      id: `custom-${file.name}-${file.size}`,
       title: file.name,
       credit: 'Your own file - played from this browser, never uploaded',
       license: 'yours',
       src: url,
       mime_type: file.type || 'video/mp4',
       subtitle_src: '',
-      subtitle_label: 'no captions supplied',
+      subtitle_label: 'no captions loaded yet',
       cues: [],
       companion_rules: [],
     }
     setAssets((current) => [custom, ...current])
     setAssetId(custom.id)
+    setSubtitleNotice(
+      'Load a subtitle file (.srt or .vtt) for this video and the companion can read it.',
+    )
     buddy.activate()
+  }
+
+  const onPickSubtitles = async (file: File | undefined) => {
+    if (!file) return
+    const text = await file.text()
+    const cues = parseSubtitles(text)
+    if (cues.length === 0) {
+      setSubtitleNotice(
+        'That subtitle file did not contain any line I could read. A SubRip (.srt) or WebVTT (.vtt) file is expected.',
+      )
+      return
+    }
+    setSubtitleNotice(
+      `Loaded ${cues.length} caption lines from ${file.name}. The companion is reading those now.`,
+    )
+    buddy.handleCueChange(cues)
   }
 
   if (loading) {
@@ -132,17 +147,20 @@ export function MovieBuddy({
     return (
       <EmptyState
         title="No film is available"
-        body="Movie Buddy needs a video it can play. Add one of the bundled open-licensed films, or choose a file from this device."
+        body="Movie Buddy needs a video it can play. Open one from this device, and load a subtitle file so the companion has something to read."
         glyph={<FilmIcon size={32} />}
         action={
-          <button type="button" className="btn btn--primary" onClick={() => fileInputRef.current?.click()}>
+          <button
+            type="button"
+            className="btn btn--primary"
+            onClick={() => fileInputRef.current?.click()}
+          >
             Choose a video
           </button>
         }
       />
     )
   }
-
 
   const companionState =
     buddy.buddy.mode === 'off'
@@ -154,6 +172,13 @@ export function MovieBuddy({
           : buddy.player.paused
             ? 'idle'
             : 'acting'
+
+  const sourceLabel =
+    buddy.buddy.source === 'model'
+      ? 'model'
+      : buddy.buddy.source === 'local'
+        ? 'local heuristic'
+        : 'unavailable'
 
   return (
     <div className="buddy">
@@ -184,7 +209,14 @@ export function MovieBuddy({
             className="btn btn--sm"
             onClick={() => fileInputRef.current?.click()}
           >
-            Open a file
+            Open a video
+          </button>
+          <button
+            type="button"
+            className="btn btn--sm"
+            onClick={() => subtitleInputRef.current?.click()}
+          >
+            Load subtitles
           </button>
           <input
             ref={fileInputRef}
@@ -192,7 +224,15 @@ export function MovieBuddy({
             accept="video/*"
             className="sr-only"
             aria-label="Choose a video file from this device"
-            onChange={(event) => onPickFile(event.target.files?.[0])}
+            onChange={(event) => onPickVideo(event.target.files?.[0])}
+          />
+          <input
+            ref={subtitleInputRef}
+            type="file"
+            accept=".srt,.vtt,text/vtt,application/x-subrip"
+            className="sr-only"
+            aria-label="Choose a subtitle file for the current video"
+            onChange={(event) => void onPickSubtitles(event.target.files?.[0])}
           />
         </div>
       </div>
@@ -203,11 +243,33 @@ export function MovieBuddy({
         </Notice>
       ))}
 
+      {subtitleNotice ? (
+        <Notice tone="warn">
+          {subtitleNotice}
+        </Notice>
+      ) : null}
+
+      {buddy.buddy.alignment.status === 'mismatch' ? (
+        <Notice tone="danger">
+          {buddy.buddy.alignment.detail}
+        </Notice>
+      ) : null}
+
+      {buddy.buddy.alignment.status === 'no-cues' ? (
+        <Notice tone="warn">
+          {buddy.buddy.alignment.detail}
+        </Notice>
+      ) : null}
+
       <div className="buddy__grid">
         <div className="buddy__stage">
-          <div className="stage" style={{ aspectRatio: buddy.stageAspect }} data-buffering={buddy.player.buffering || undefined}>
+          <div
+            className="stage"
+            style={{ aspectRatio: buddy.stageAspect }}
+            data-buffering={buddy.player.buffering || undefined}
+          >
             <video
-              ref={buddy.videoRef}
+              ref={buddy.attachVideo}
               controls
               preload="metadata"
               playsInline
@@ -219,7 +281,6 @@ export function MovieBuddy({
               onEnded={buddy.handleEnded}
               onSeeked={buddy.handleTimeUpdate}
             >
-              {/* The browser takes the first encode it can decode. */}
               {(asset.sources ?? [{ src: asset.src, mime_type: asset.mime_type, label: 'video' }]).map(
                 (source) => (
                   <source key={source.src} src={source.src} type={source.mime_type} />
@@ -227,10 +288,6 @@ export function MovieBuddy({
               )}
               {buddy.trackUrl ? (
                 <track
-                  ref={(element) => {
-                    trackElementRef.current = element
-                    if (element?.track && element.track.mode !== 'hidden') element.track.mode = 'hidden'
-                  }}
                   kind="subtitles"
                   src={buddy.trackUrl}
                   srcLang="en"
@@ -282,7 +339,9 @@ export function MovieBuddy({
             <button
               type="button"
               className="btn btn--sm"
-              onClick={() => buddy.setRate(buddy.player.rate === 1 ? 1.5 : buddy.player.rate === 1.5 ? 2 : 1)}
+              onClick={() =>
+                buddy.setRate(buddy.player.rate === 1 ? 1.5 : buddy.player.rate === 1.5 ? 2 : 1)
+              }
             >
               {buddy.player.rate}x
             </button>
@@ -291,7 +350,7 @@ export function MovieBuddy({
             </span>
           </div>
 
-          <BuddyTimeline asset={asset} currentTime={buddy.player.currentTime} />
+          <BuddyTimeline cues={buddy.cues} currentTime={buddy.player.currentTime} />
         </div>
 
         <aside className="buddy__panel">
@@ -320,11 +379,24 @@ export function MovieBuddy({
                       : 'Movie Buddy is on and following the captions.'}
               </p>
               <p className="hint">
-                {asset.cues.length > 0
-                  ? `${asset.cues.length} caption lines · subtitle-based understanding, no picture analysis.`
-                  : 'This source has no captions, so the companion has nothing to ground a comment in.'}
+                {buddy.buddy.alignment.status === 'no-cues'
+                  ? 'No caption track is loaded, so the companion has nothing to read.'
+                  : `Reading ${asset.subtitle_label}.`}
               </p>
             </div>
+          </div>
+
+          <div className="buddy__source-note">
+            <span className="buddy__source-label">
+              Commentary source: <b>{sourceLabel}</b>
+            </span>
+            <span className="hint">
+              {buddy.buddy.source === 'model'
+                ? 'Remarks are written by the configured model provider, from the caption lines it was shown.'
+                : buddy.buddy.source === 'local'
+                  ? 'No model provider is configured, so Sidekick uses a local heuristic that only reports what it can observe in the captions.'
+                  : 'No commentary source is available.'}
+            </span>
           </div>
 
           <div className="buddy__commands">
@@ -333,7 +405,9 @@ export function MovieBuddy({
               <button
                 type="button"
                 className="btn btn--sm"
-                onClick={() => (buddy.buddy.mode === 'off' ? buddy.activate() : buddy.deactivate())}
+                onClick={() =>
+                  buddy.buddy.mode === 'off' ? buddy.activate() : buddy.deactivate()
+                }
               >
                 {buddy.buddy.mode === 'off' ? 'Turn on Movie Buddy' : 'Turn off Movie Buddy'}
               </button>
@@ -380,23 +454,31 @@ export function MovieBuddy({
             </button>
             {showWhy ? (
               <div className="buddy__why-body">
-                {buddy.buddy.lastReaction ? (
+                {buddy.buddy.lastRemark ? (
                   <>
-                    <p className="buddy__why-line">{buddy.buddy.lastReaction.reason}</p>
+                    <p className="buddy__why-line">{buddy.buddy.lastRemark.reason}</p>
                     <p className="hint">
-                      Triggered by the caption at {formatClock(buddy.buddy.lastReaction.at)}: &ldquo;
-                      {buddy.buddy.lastReaction.cue.text}&rdquo;
+                      Grounded in the caption at {formatClock(buddy.buddy.lastRemark.cue.start)}: &ldquo;
+                      {buddy.buddy.lastRemark.cue.text}&rdquo;
+                    </p>
+                    <p className="hint">
+                      Written by: <b>{sourceLabel}</b>. It saw{' '}
+                      {buddy.buddy.lastRemark.grounded_in.length} caption line
+                      {buddy.buddy.lastRemark.grounded_in.length === 1 ? '' : 's'}.
                     </p>
                   </>
                 ) : (
                   <p className="hint">
-                    Sidekick has not reacted yet. A reaction happens when a real caption line
-                    satisfies one of its rules - never on a timer.
+                    Sidekick has not said anything yet. A remark only happens when a real caption
+                    line says something worth noticing - never on a timer.
                   </p>
                 )}
-                {buddy.lastGate ? (
+                {buddy.buddy.lastDecision ? (
                   <p className="hint">
-                    Right now it would hold back: {buddy.lastGate.reason}
+                    Right now it would hold back:{' '}
+                    {buddy.buddy.lastDecision.kind === 'speak'
+                      ? 'it has something to say.'
+                      : buddy.buddy.lastDecision.reason}
                   </p>
                 ) : null}
               </div>
@@ -405,18 +487,22 @@ export function MovieBuddy({
 
           <div className="buddy__log">
             <p className="field__label">Remarks</p>
-            {buddy.buddy.reactions.length === 0 ? (
-              <p className="hint">Nothing yet. Sidekick is being selective on purpose.</p>
+            {buddy.buddy.remarks.length === 0 ? (
+              <p className="hint">
+                Nothing yet. Sidekick is being selective on purpose.
+              </p>
             ) : (
               <ul className="buddy__log-list">
-                {buddy.buddy.reactions
+                {buddy.buddy.remarks
                   .slice()
                   .reverse()
-                  .map((reaction) => (
-                    <li key={reaction.id} className="buddy__log-item">
-                      <span className="buddy__log-time">{formatClock(reaction.at)}</span>
-                      <span className="buddy__log-say">{reaction.say}</span>
-                      <span className="buddy__log-rule">{reaction.rule}</span>
+                  .map((remark) => (
+                    <li key={remark.id} className="buddy__log-item">
+                      <span className="buddy__log-time">{formatClock(remark.at)}</span>
+                      <span className="buddy__log-say">{remark.say}</span>
+                      <span className="buddy__log-rule">
+                        {remark.source === 'model' ? 'model' : 'local'}
+                      </span>
                     </li>
                   ))}
               </ul>
@@ -429,19 +515,22 @@ export function MovieBuddy({
 }
 
 function BuddyTimeline({
-  asset,
+  cues,
   currentTime,
 }: {
-  asset: MediaAsset
+  cues: MediaCue[]
   currentTime: number
 }) {
-  const total = asset.cues.length > 0 ? (asset.cues[asset.cues.length - 1]?.end ?? 1) : 1
+  const total = cues.length > 0 ? (cues[cues.length - 1]?.end ?? 1) : 1
 
   return (
     <div className="buddy__timeline" role="group" aria-label="Caption timeline">
       <div className="buddy__timeline-track">
-        <div className="buddy__timeline-played" style={{ width: `${(currentTime / total) * 100}%` }} />
-        {asset.cues.map((cue) => (
+        <div
+          className="buddy__timeline-played"
+          style={{ width: `${(currentTime / total) * 100}%` }}
+        />
+        {cues.map((cue: MediaCue) => (
           <span
             key={cue.index}
             className="buddy__timeline-cue"
@@ -451,7 +540,7 @@ function BuddyTimeline({
         ))}
       </div>
       <p className="hint">
-        {asset.cues.length} caption lines over {formatClock(total)}. The playhead follows the real
+        {cues.length} caption lines over {formatClock(total)}. The playhead follows the real
         media clock.
       </p>
     </div>

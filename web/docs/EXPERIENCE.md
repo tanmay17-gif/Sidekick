@@ -16,7 +16,11 @@ defined in `.sidekick/TEAM_PLAYBOOK.md` §8.
 | Two interfaces, one session | `REAL_AND_VERIFIED` | Interface A and Interface B read the same request list, session id and event stream. Verified end to end in a real browser. |
 | Movie playback | `REAL_AND_VERIFIED` | The bundled *Duck and Cover* clip really plays; the E2E suite waits for `readyState >= 1`, asserts a real duration and plays it. |
 | Subtitle synchronisation | `REAL_AND_VERIFIED` | Cue lookup is a pure function over `video.currentTime`; the E2E suite plays the film and asserts the caption shown matches the real playback position. |
-| Movie Buddy reactions | `REAL_AND_VERIFIED` (caption-based) | Each reaction fires on a real caption line that satisfies a real rule. The trigger is recorded and shown in "Why did Sidekick react?". |
+| Movie Buddy reactions | `REAL_AND_VERIFIED` (caption-driven) | A remark is produced by the engine in `web/src/lib/movie/engine.ts` from a window of real caption cues around the media clock, and the trigger and the grounding are recorded and shown in "Why did Sidekick react?". The unit suite proves the remark changes with the active film. |
+| Movie Buddy commentary source | `REAL` when a provider is configured, otherwise `LOCAL_HEURISTIC` | The provider is chosen in `web/src/lib/movie/provider.ts`. The interface always names the source of the last remark (`model`, `local heuristic`, `unavailable`) and never claims a model wrote a remark it did not. |
+| Commentary model provider | `NOT_CONFIGURED` in this repository | The core exposes no free-form generation endpoint, and no provider credentials exist. The client is configured through `VITE_SIDECKICK_COMMENTARY_*`; without it the local heuristic is used and says so. |
+| Subtitles for an arbitrary video | `REAL_AND_VERIFIED` | "Open a video" plus "Load subtitles" accept any local video with a `.srt` / `.vtt` file. The file is parsed in the browser; nothing is uploaded. |
+| Subtitle / media alignment | `REAL_AND_VERIFIED` | `alignmentReport` compares the caption coverage with the media duration and reports `ok`, `no-cues` or `mismatch`, and the mismatch is shown to the viewer. |
 | Intent resolution / decision engine | `REAL_AND_VERIFIED` against the real backend | Verified on 2026-10-21 against the merged core (`main` @ `fcd2427`): the client showed `backend LIVE`, the real tool inventory, the streamed progress events and the action the real engine chose. Re-run with `node scripts/verify-real-backend.mjs`. |
 | Coding job execution and diff | `REAL_BUT_UNVERIFIED` | The client renders the real diff, the changed-file list and the real test result (Agent 2's issue #6 is closed on this side). The execution service was not reachable from this environment, so the end-to-end path is unproven. |
 | Music providers | `NOT_CONFIGURED` | No provider credentials exist. The UI shows the provider list with `unconfigured` state and explains what is needed. |
@@ -178,27 +182,112 @@ Movie Buddy is a **companion mode**, not a film. Switching it on is
 independent of which film is playing: "Turn on Movie Buddy" works with any
 source, and the film can be chosen before or after.
 
+### What it was before this milestone
+
+The commentary was **hardcoded**. `web/src/lib/movie/buddy.ts` exported
+`reactToCue`, which returned one of six fixed strings - `'Hi. Watching with
+you.'`, `'Right - here is the plan.'`, `'Listen to that.'`, `'Same idea again,
+slightly different.'`, `'Step by step.'`, `'That is the end of it.'` - chosen by
+a rule list. Two of those rules were English-verb specific: `IMPERATIVE`
+matched a literal list of English verbs (`inflate|twist|lock|take|...`) and a
+second rule matched `/\bwe are going to\b|\bwe'll\b|\blet's\b/i`. Both were
+tuned to the narration of *Duck and Cover*. There was no model call anywhere in
+the client, the context was used only for a word-overlap check, and the words
+Sidekick spoke did not depend on what the captions actually said.
+
+### How it works now
+
+```
+video.currentTime
+   -> the caption line that has just been said      (context.ts)
+   -> a bounded window of dialogue                   (context.ts)
+   -> a usefulness decision                          (engine.ts)
+   -> the commentary provider                        (provider.ts)
+   -> a remark that is grounded in the cues it saw  (provider.ts)
+   -> the speaking gate                              (engine.ts)
+   -> speech
+```
+
+- **The cue.** The companion talks about the last caption line that has
+  *started* - the line the viewer has just heard. It never speaks while a line
+  is on screen; it speaks in the gap after one. A line it had to stay quiet
+  for is not marked as considered, so it can still be remarked on later.
+- **The window.** `buildCueWindow` returns the previous 3 cues, the current
+  cue, the next 2 cues and a bounded recent window (8 cues). The provider is
+  given that window and **never** the whole subtitle file.
+- **The decision.** The engine suppresses the remark when a caption is on
+  screen, when the line is doing the work (long, emphatic, or a question with
+  real content in it), when the same moment was already remarked on (even
+  after a seek back), when the speaking budget for the minute is spent, when
+  the cooldown has not expired, or when the viewer asked for quiet.
+- **The provider.** `web/src/lib/movie/provider.ts` has three:
+  - `createModelProvider` - calls a configured OpenAI-compatible endpoint. The
+    request is cancellable, has a timeout, and is rate limited independently of
+    the speaking budget (at most one call every 4 seconds).
+  - `createLocalProvider` - a deterministic fallback that only reports what it
+    can observe in the captions (a repeated phrase, a new term, a sound, a
+    question). It is labelled **local heuristic**, never "model".
+  - `createUnavailableProvider` - used when there is nothing to read, and it
+    explains why.
+- **The grounding check.** A model answer must be JSON with a `say` string and
+  a `grounded_in` list of cue indexes. An answer that is not JSON, is too long
+  to speak, or names a cue the provider was never shown is **rejected** and
+  nothing is spoken. This is the check that stops the companion from
+  fabricating.
+- **The source is always visible.** The interface shows `model`,
+  `local heuristic` or `unavailable` next to the remarks, and the "why" panel
+  repeats it for the last remark.
+
+### The provider configuration
+
+There is no free-form generation endpoint in the core (it exposes
+`/api/v1/requests`, `/api/v1/decide` and the action routes - a decision, not
+free text), so the commentary provider is configured on the client side:
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `VITE_SIDECKICK_COMMENTARY_ENDPOINT` | unset | An OpenAI-compatible chat completions URL. **Unset means no model provider.** |
+| `VITE_SIDECKICK_COMMENTARY_MODEL` | `sidekick-commentary` | The model name sent with the request. |
+| `VITE_SIDECKICK_COMMENTARY_API_KEY` | unset | Optional bearer token. |
+| `VITE_SIDECKICK_COMMENTARY_TIMEOUT_MS` | `8000` | Abort a provider call that has not answered in time. |
+
+Without `VITE_SIDECKICK_COMMENTARY_ENDPOINT` the client uses the local
+heuristic and says so in the interface. It never claims a model wrote a remark
+it did not write.
+
+### The rest of the behaviour
+
 - **Commands** (spoken or typed): turn on / turn off / resume Movie Buddy,
   be quiet, what just happened, explain that moment, pause, go back 30
   seconds, and "play me a movie and turn on Movie Buddy".
 - **Activation** sets the mode; it never selects a film. When no media is
   available the surface offers the bundled open-licensed film and a file
   picker.
-- **Reactions** only happen when a real caption line satisfies a real rule.
-  The rules are: the first line of the track, a line that states a plan, a
-  line marked as a sound, a step, a step that repeats an earlier one with a
-  variation, and the final line. Blank caption lines never trigger anything.
-- **The companion is deliberately quiet.** It has a speaking budget of three
-  remarks a minute, a twelve-second cooldown, and it never speaks while a
-  caption is on screen. `Quiet` stops it immediately for a minute.
+- **Any video.** "Open a video" plays a file from this device and "Load
+  subtitles" attaches a `.srt` or `.vtt` file to it. The file is parsed in the
+  browser and never uploaded. A video with no caption track gets a clear
+  notice that the companion has nothing to read, and the "load subtitles"
+  affordance.
+- **Alignment.** If the captions stop long before the film ends, the interface
+  warns that the subtitles may not match this copy of the film.
+- **Re-evaluation.** A seek, a pause, a resume and a subtitle-track change all
+  re-evaluate the moment instead of reasoning about the one that has moved on.
 - **Answers are grounded.** "What just happened?" quotes the captions from the
   last 45 seconds. "Explain that moment?" quotes the captions around the
   moment. When no caption covers the moment the answer says exactly that, and
   states that there is no picture analysis.
-- **"Why did Sidekick react?"** shows the actual trigger: the rule that fired
-  and the caption line with its timestamp. It also shows what the companion
-  would be holding back for right now (a caption on screen, the budget, the
-  cooldown, quiet mode).
+- **"Why did Sidekick react?"** shows the actual trigger: the observable
+  property of the caption line, the line with its timestamp, and the source of
+  the words. It also shows what the companion would be holding back for right
+  now.
+
+### What it is not
+
+- It does **not** analyse the picture. It only reads captions.
+- It does **not** describe off-screen action, character intention or plot.
+- It does **not** work on a streaming service in another tab, and it never
+  pretends to.
+- It does **not** speak over dialogue.
 
 See `MOVIE_SOURCES.md` for the film, the rights evidence and the exact
 limits on what the companion can observe.
@@ -216,3 +305,16 @@ limits on what the companion can observe.
 - Agent 2's issue #6 is closed on this side: an action result now shows the
   diff, the changed-file list **and** the test result together, and a
   `partial` outcome is never rendered as a success.
+- **Proposal for Agent 1 (not implemented here, because the core is Agent 1's
+  file).** The core has no free-form generation endpoint, so the commentary
+  provider had to be configured in the browser client. A
+  `POST /api/v1/commentary` route on the core - taking a bounded cue window
+  and returning `{ say, grounded_in }` - would let the companion use the same
+  model the rest of the product uses and keep the API key on the server. The
+  client already speaks OpenAI-compatible chat completions, so pointing it at
+  such a route is a configuration change, not a code change. **No core file was
+  touched by this milestone.**
+- The core's media catalog still carries `companion_rules`
+  (`web/src/lib/media/companion.ts`); the rules are honoured by the contract
+  level event builder, and the *adaptive* commentary path in
+  `web/src/lib/movie/` is independent of them.

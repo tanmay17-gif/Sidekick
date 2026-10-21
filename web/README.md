@@ -5,7 +5,7 @@ The browser surface of Sidekick. Two interfaces, one session:
 - **Interface A - Ask Sidekick / Movie Buddy.** The conversational surface you
   talk to. A large companion that reflects what Sidekick is actually doing, a
   readable transcript, and a movie companion that reads the captions of the
-  film you are watching.
+  film you are watching and remarks on them in the gaps between the lines.
 - **Interface B - Control room.** The developer view of the *same* session: the
   live architecture diagram, the decision metadata for every request, the task
   timeline fed by the real event stream, and the true status of every
@@ -19,7 +19,7 @@ web/
     lib/api/          contract v1 client, types, error normalisation
     lib/voice/        Web Speech recognition + synthesis wrappers
     lib/media/        subtitle parsing, cue lookup, the movie player state
-    lib/movie/        the Movie Buddy brain and its control commands
+    lib/movie/        the Movie Buddy engine, providers and control commands
     lib/games/        FEN rendering, local game rules
     state/            the shared session state machine
     components/       the interface
@@ -111,7 +111,10 @@ confirm nothing is carried over, and capture the normal experience.
 | Interface A / Interface B | **REAL, one session** | Both read the same request list, session id and event stream. |
 | Architecture diagram | **REAL** | Every node's state comes from the backend's own capability report. |
 | Movie playback | **REAL** | A bundled public-domain film, played for real, with its own captions. |
-| Movie Buddy | **REAL, caption-based** | Reactions fire on real caption lines. There is **no visual analysis** and the interface says so. |
+| Movie Buddy | **REAL, caption-driven** | Remarks are produced from a bounded window of real caption cues around the media clock. The trigger and the grounding are shown. There is **no visual analysis** and the interface says so. |
+| Movie Buddy commentary | **REAL, model-backed when configured** | The provider is chosen at runtime. The interface always names the source of the last remark: `model`, `local heuristic` or `unavailable`. |
+| Commentary model provider | **NOT CONFIGURED** | The core has no free-form generation endpoint and no credentials exist here. Set `VITE_SIDECKICK_COMMENTARY_ENDPOINT` to use one; without it the local heuristic is used and labelled as such. |
+| Subtitles for your own video | **REAL** | "Open a video" + "Load subtitles" (`.srt` / `.vtt`). Parsed in the browser; never uploaded. |
 | Coding job diff | **REAL, unverified end to end** | The client renders the real diff, changed files and test result. The execution service was not reachable from this environment. |
 | Music / game providers | **NOT CONFIGURED** | No credentials. The interface explains what is needed instead of faking a player. |
 | Alexa+ | **NOT IMPLEMENTED** | The Web Speech API is not Alexa+ and is never presented as one. |
@@ -132,6 +135,38 @@ Two more films are available: *Letter V* (CC0 1.0, bundled) and *Tears of
 Steel* (CC BY 3.0, streamed). The exact copies, the rights evidence and the
 limits are in `docs/MOVIE_SOURCES.md`.
 
+You are not limited to those films: **Open a video** plays a file from this
+device and **Load subtitles** attaches a `.srt` or `.vtt` file to it. The
+companion then reads those captions. If the captions stop long before the film
+ends, the interface warns that they may not match that copy.
+
+## How Movie Buddy decides to speak
+
+```
+video.currentTime
+   -> the caption line that has just been said
+   -> a bounded window (3 before, the current one, 2 after, 8 recent)
+   -> a usefulness decision (never over dialogue, never twice, budget, cooldown)
+   -> the commentary provider
+   -> a remark grounded in the cues it was shown
+   -> speech
+```
+
+The provider is one of:
+
+- **model** - a configured OpenAI-compatible endpoint
+  (`VITE_SIDECKICK_COMMENTARY_ENDPOINT`). The call is cancellable, has a
+  timeout, is rate limited, and is given a *window* of cues - never the whole
+  subtitle file. An answer that names a cue the provider was never shown is
+  rejected.
+- **local heuristic** - the deterministic fallback, used when no endpoint is
+  configured. It only reports what it can observe in the captions. It is
+  labelled `local heuristic`, never "model".
+- **unavailable** - when there is nothing to read; the interface says why and
+  asks for a subtitle track.
+
+The source of the last remark is always visible in the Movie Buddy panel.
+
 ## Configuration
 
 | Variable | Default | Purpose |
@@ -143,6 +178,10 @@ limits are in `docs/MOVIE_SOURCES.md`.
 | `VITE_SIDECKICK_ACTION_EVENTS_PATH` | `/api/v1/actions/:id/events` | Live action event stream. |
 | `VITE_SIDECKICK_APPROVE_PATH` | `/api/v1/actions/:id/approve` | Approval endpoint. |
 | `VITE_SIDECKICK_CANCEL_PATH` | `/api/v1/actions/:id/cancel` | Cancellation endpoint. |
+| `VITE_SIDECKICK_COMMENTARY_ENDPOINT` | unset | OpenAI-compatible chat completions URL for Movie Buddy commentary. Unset = no model provider. |
+| `VITE_SIDECKICK_COMMENTARY_MODEL` | `sidekick-commentary` | Model name sent with a commentary request. |
+| `VITE_SIDECKICK_COMMENTARY_API_KEY` | unset | Optional bearer token for the commentary endpoint. |
+| `VITE_SIDECKICK_COMMENTARY_TIMEOUT_MS` | `8000` | Abort a commentary call that has not answered in time. |
 | `SIDECKICK_API_TARGET` | `http://127.0.0.1:8000` | Dev proxy target (build/run side). |
 
 Only paths are configurable - the request and response shapes come from

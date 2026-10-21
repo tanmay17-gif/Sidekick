@@ -253,7 +253,7 @@ test('really plays the bundled film and syncs the captions to the media clock', 
   expect((await overlay.innerText()).length).toBeGreaterThan(0)
 })
 
-test('the companion reacts at a real caption and explains why', async ({ page }) => {
+test('the companion remarks in the gap after a line and explains why', async ({ page }) => {
   await page.getByRole('button', { name: 'Movie Buddy', exact: true }).click()
   const toggle = page.getByRole('button', { name: /Turn (on|off) Movie Buddy/ })
   if ((await toggle.innerText()).includes('Turn off')) {
@@ -271,16 +271,31 @@ test('the companion reacts at a real caption and explains why', async ({ page })
     { timeout: 30_000 },
   )
 
-  // Move the real media clock onto the first caption line.
+  // Move the real media clock into the gap after a caption line: that is where
+  // the companion is allowed to speak, never over a line that is on screen.
   await video.evaluate((element) => {
     const media = element as HTMLVideoElement
-    media.currentTime = 1.5
+    media.currentTime = 15.5
     media.dispatchEvent(new Event('timeupdate'))
   })
 
   await expect(page.locator('.buddy__log-item').first()).toBeVisible()
   await page.getByRole('button', { name: 'Why did Sidekick react?' }).click()
-  await expect(page.getByText(/first line in the caption track/i)).toBeVisible()
+  await expect(page.getByText(/Grounded in the caption at/i)).toBeVisible()
+})
+
+test('says honestly where the commentary comes from', async ({ page }) => {
+  await page.getByRole('button', { name: 'Movie Buddy', exact: true }).click()
+  // No model provider is configured in the test environment.
+  await expect(page.getByText(/Commentary source:/i)).toBeVisible()
+  await expect(page.getByText('local heuristic', { exact: true })).toBeVisible()
+  await expect(page.getByText(/No model provider is configured/i)).toBeVisible()
+})
+
+test('offers a way to load subtitles for an arbitrary video', async ({ page }) => {
+  await page.getByRole('button', { name: 'Movie Buddy', exact: true }).click()
+  await expect(page.getByRole('button', { name: 'Open a video' })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Load subtitles' })).toBeVisible()
 })
 
 test('goes quiet on request and resumes', async ({ page }) => {

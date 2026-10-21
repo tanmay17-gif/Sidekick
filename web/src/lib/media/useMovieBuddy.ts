@@ -1,16 +1,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { MediaAsset, MediaCue } from '@/lib/api/types'
+import { answerWhatJustHappened, explainTheMoment, type GroundedAnswer } from '@/lib/movie/buddy'
+import { alignmentReport, type AlignmentReport } from '@/lib/movie/context'
+import { BuddyEngine, type BuddyMode, type BuddyRemark, type RemarkDecision } from '@/lib/movie/engine'
 import {
-  answerWhatJustHappened,
-  canSpeak,
-  DEFAULT_BUDGET,
-  pushContext,
-  reactToCue,
-  type BuddyMode,
-  type BuddyReaction,
-  type GroundedAnswer,
-  type SpeakingGate,
-} from '@/lib/movie/buddy'
+  createLocalProvider,
+  createModelProvider,
+  createUnavailableProvider,
+  type CommentaryProvider,
+  type CommentarySource,
+} from '@/lib/movie/provider'
 import { findCueIndex } from '@/lib/media/cues'
 import { toWebVtt } from '@/lib/media/subtitles'
 import type { Speaker } from '@/lib/voice/synthesis'
@@ -30,39 +29,46 @@ export interface MovieBuddyState {
   mode: BuddyMode
   quietUntil: number
   quietRemainingMs: number
-  reactions: BuddyReaction[]
-  lastReaction: BuddyReaction | null
+  remarks: BuddyRemark[]
+  lastRemark: BuddyRemark | null
+  lastDecision: RemarkDecision | null
+  /** The answer to the viewer's last question, if any. */
   lastAnswer: GroundedAnswer | null
-  /** Why the last reaction fired - the actual trigger, not a rationale. */
-  lastTrigger: string | null
+  /** Where the remarks come from. */
+  source: CommentarySource
+  providerId: string
   speaking: boolean
-  contextSize: number
+  /** How well the subtitles line up with this copy of the film. */
+  alignment: AlignmentReport
 }
 
 export interface UseMovieBuddyOptions {
   asset: MediaAsset | null
   speaker: Speaker
   speechEnabled: boolean
+  /** Overrides the provider - used by the tests. */
+  provider?: CommentaryProvider
   onSay?: (text: string) => void
 }
 
 export interface UseMovieBuddyResult {
-  videoRef: React.RefObject<HTMLVideoElement>
+  videoRef: React.MutableRefObject<HTMLVideoElement | null>
+  /** Attach this to the <video> element. */
+  attachVideo: (element: HTMLVideoElement | null) => void
   player: PlayerState
   buddy: MovieBuddyState
   activeCueIndex: number
   activeCueText: string
+  /** The caption cues that are actually loaded right now. */
+  cues: MediaCue[]
   trackUrl: string | null
-  /** The aspect ratio the stage should use for this film. */
-  stageAspect: string
-  /** Speak a line now, honouring the budget, the cooldown and the captions. */
   trySpeak: (text: string) => void
   activate: () => void
   deactivate: () => void
   quiet: (ms?: number) => void
   resumeBuddy: () => void
-  askWhatHappened: () => GroundedAnswer
-  askExplain: () => GroundedAnswer
+  askWhatHappened: () => void
+  askExplain: () => void
   togglePlay: () => void
   seekBy: (seconds: number) => void
   seekTo: (seconds: number) => void
@@ -73,16 +79,41 @@ export interface UseMovieBuddyResult {
   handleWaiting: () => void
   handlePlaying: () => void
   handleEnded: () => void
-  lastGate: SpeakingGate | null
+  handleCueChange: (cues: MediaCue[]) => void
+  stageAspect: string
 }
 
 const QUIET_DEFAULT_MS = 60_000
-const SPEECH_WINDOW_MS = 60_000
+
+/**
+ * The model provider, if the team configured one.
+ *
+ * Without configuration the companion falls back to the local heuristic and
+ * says so in the interface - it never claims a model wrote a remark.
+ */
+export function resolveProvider(override?: CommentaryProvider): CommentaryProvider {
+  if (override) return override
+  const env = (import.meta.env ?? {}) as Record<string, string | undefined>
+  const endpoint = env.VITE_SIDECKICK_COMMENTARY_ENDPOINT
+  if (endpoint) {
+    return createModelProvider({
+      endpoint,
+      model: env.VITE_SIDECKICK_COMMENTARY_MODEL ?? 'sidekick-commentary',
+      apiKey: env.VITE_SIDECKICK_COMMENTARY_API_KEY,
+      timeoutMs: Number(env.VITE_SIDECKICK_COMMENTARY_TIMEOUT_MS ?? 8000),
+    })
+  }
+  return createLocalProvider()
+}
 
 export function useMovieBuddy(options: UseMovieBuddyOptions): UseMovieBuddyResult {
-  const { asset, speaker, speechEnabled } = options
+  const { asset, speaker, speechEnabled, provider, onSay } = options
 
   const videoRef = useRef<HTMLVideoElement | null>(null)
+  /** A callback ref, so the video element is always reachable. */
+  const attachVideo = useCallback((element: HTMLVideoElement | null) => {
+    videoRef.current = element
+  }, [])
   const [player, setPlayer] = useState<PlayerState>({
     currentTime: 0,
     duration: 0,
@@ -97,39 +128,55 @@ export function useMovieBuddy(options: UseMovieBuddyOptions): UseMovieBuddyResul
   const [mode, setMode] = useState<BuddyMode>('off')
   const [quietUntil, setQuietUntil] = useState(0)
   const [now, setNow] = useState(() => Date.now())
-  const [reactions, setReactions] = useState<BuddyReaction[]>([])
-  const [lastReaction, setLastReaction] = useState<BuddyReaction | null>(null)
-  const [lastAnswer, setLastAnswer] = useState<GroundedAnswer | null>(null)
+  const [remarks, setRemarks] = useState<BuddyRemark[]>([])
+  const [lastRemark, setLastRemark] = useState<BuddyRemark | null>(null)
+  const [lastDecision, setLastDecision] = useState<RemarkDecision | null>(null)
   const [speaking, setSpeaking] = useState(false)
-  const [lastGate, setLastGate] = useState<SpeakingGate | null>(null)
+  const [cues, setCues] = useState<MediaCue[]>([])
+  const [lastAnswer, setLastAnswer] = useState<GroundedAnswer | null>(null)
+  /** Where the remarks come from - kept in state so the label stays honest. */
+  const [source, setSource] = useState<CommentarySource>(() => resolveProvider(provider).source)
+  const [providerId, setProviderId] = useState<string>(() => resolveProvider(provider).id)
+  const inFlightRef = useRef<AbortController | null>(null)
 
-  const contextRef = useRef<MediaCue[]>([])
-  const lastCueIndexRef = useRef(-1)
-  const lastSpokeAtRef = useRef<number | null>(null)
-  const spokenCountRef = useRef(0)
-  const windowStartRef = useRef(Date.now())
+  const engineRef = useRef<BuddyEngine | null>(null)
+  if (engineRef.current === null) {
+    engineRef.current = new BuddyEngine({ provider: resolveProvider(provider) })
+  }
+  const engine = engineRef.current
 
-  const cues = useMemo(() => asset?.cues ?? [], [asset])
-
-  // Reset everything when the film changes.
+  // A new provider means a new engine.
   useEffect(() => {
-    contextRef.current = []
-    lastCueIndexRef.current = -1
-    lastSpokeAtRef.current = null
-    spokenCountRef.current = 0
-    windowStartRef.current = Date.now()
-    setReactions([])
-    setLastReaction(null)
-    setLastAnswer(null)
-    setPlayer((current) => ({
-      ...current,
-      currentTime: 0,
-      paused: true,
-      ended: false,
-      mediaError: null,
-      ready: false,
-    }))
-  }, [asset?.id])
+    engineRef.current = new BuddyEngine({ provider: resolveProvider(provider) })
+  }, [provider])
+
+  // Load the film's captions. A film without a caption track gets a provider
+  // that refuses, with the reason shown in the interface.
+  useEffect(() => {
+    const loaded = asset?.cues ?? []
+    setCues(loaded)
+    engine.reset()
+    setRemarks([])
+    setLastRemark(null)
+    setLastDecision(null)
+  }, [asset, engine])
+
+  /**
+   * A film with no usable subtitles gets a provider that refuses, so the
+   * interface reports "unavailable" instead of pretending to have something
+   * to say.
+   */
+  useEffect(() => {
+    engine.setProvider(
+      cues.length > 0
+        ? resolveProvider(provider)
+        : createUnavailableProvider(
+            'This film has no caption track, so there is nothing to read. Load a subtitle file to switch the companion on.',
+          ),
+    )
+    setSource(engine.source)
+    setProviderId(engine.providerId)
+  }, [cues, engine, provider])
 
   // A tick that keeps the quiet countdown honest.
   useEffect(() => {
@@ -138,36 +185,21 @@ export function useMovieBuddy(options: UseMovieBuddyOptions): UseMovieBuddyResul
     return () => clearInterval(timer)
   }, [mode])
 
-  const activeCueIndex = useMemo(() => findCueIndex(cues, player.currentTime), [cues, player.currentTime])
+  const activeCueIndex = useMemo(
+    () => findCueIndex(cues, player.currentTime),
+    [cues, player.currentTime],
+  )
   const activeCue = activeCueIndex >= 0 ? (cues[activeCueIndex] ?? null) : null
+  const alignment = useMemo(
+    () => alignmentReport(cues, player.duration),
+    [cues, player.duration],
+  )
 
   const trySpeak = useCallback(
     (text: string) => {
-      const timestamp = Date.now()
-      // Keep the speaking window fresh.
-      if (timestamp - windowStartRef.current > SPEECH_WINDOW_MS) {
-        windowStartRef.current = timestamp
-        spokenCountRef.current = 0
-      }
-
-      const gate = canSpeak({
-        mode,
-        quietUntil,
-        now: timestamp,
-        lastSpokeAt: lastSpokeAtRef.current,
-        spokenInWindow: spokenCountRef.current,
-        settings: DEFAULT_BUDGET,
-        captionOnScreen: activeCue !== null,
-      })
-      setLastGate(gate)
-
-      if (!gate.allowed) return false
       if (!speechEnabled) return false
-
-      lastSpokeAtRef.current = timestamp
-      spokenCountRef.current += 1
       setSpeaking(true)
-      options.onSay?.(text)
+      onSay?.(text)
       void speaker.speak(text, {
         onStart: () => setSpeaking(true),
         onEnd: () => setSpeaking(false),
@@ -175,8 +207,60 @@ export function useMovieBuddy(options: UseMovieBuddyOptions): UseMovieBuddyResul
       })
       return true
     },
-    [activeCue, mode, options, quietUntil, speechEnabled, speaker],
+    [onSay, speaker, speechEnabled],
   )
+
+  /**
+   * Re-evaluate the moment.
+   *
+   * Called on every media time update, and again after a seek, a pause, a
+   * resume or a subtitle change, so the companion is never reasoning about a
+   * moment that has moved on.
+   */
+  const evaluate = useCallback(
+    async (question?: string) => {
+      const video = videoRef.current
+      const currentTime = video ? video.currentTime : player.currentTime
+      const captionOnScreen = findCueIndex(cues, currentTime) !== -1
+      const controller = new AbortController()
+      inFlightRef.current?.abort()
+      inFlightRef.current = controller
+
+      const decision = await engine.consider({
+        mode,
+        quietUntil,
+        cues,
+        currentTime,
+        captionOnScreen,
+        question,
+        filmId: asset?.id,
+        filmTitle: asset?.title,
+        signal: controller.signal,
+      })
+      setLastDecision(decision)
+
+      if (decision.kind === 'speak') {
+        setRemarks((current) => [...current, decision.remark].slice(-24))
+        setLastRemark(decision.remark)
+        trySpeak(decision.remark.say)
+      }
+      return decision
+    },
+    [asset, cues, engine, mode, player.currentTime, quietUntil, trySpeak],
+  )
+
+  // The latest evaluator, without making the effects below depend on every
+  // playback tick.
+  const evaluateRef = useRef(evaluate)
+  evaluateRef.current = evaluate
+
+  /**
+   * When the caption track changes the moment has to be looked at again, with
+   * the new provider in place.
+   */
+  useEffect(() => {
+    void evaluateRef.current()
+  }, [cues])
 
   const handleTimeUpdate = useCallback(() => {
     const video = videoRef.current
@@ -192,24 +276,8 @@ export function useMovieBuddy(options: UseMovieBuddyOptions): UseMovieBuddyResul
     }))
 
     if (mode === 'off') return
-
-    const index = findCueIndex(cues, time)
-    if (index === -1 || index === lastCueIndexRef.current) return
-    lastCueIndexRef.current = index
-
-    const cue = cues[index]
-    if (!cue) return
-
-    contextRef.current = pushContext(contextRef.current, cue, DEFAULT_BUDGET.contextSize)
-
-    const isLast = index === cues.length - 1
-    const reaction = reactToCue(cue, contextRef.current.slice(0, -1), isLast)
-    if (!reaction) return
-
-    setReactions((current) => [...current, reaction].slice(-24))
-    setLastReaction(reaction)
-    trySpeak(reaction.say)
-  }, [cues, mode, trySpeak])
+    void evaluate()
+  }, [evaluate, mode])
 
   const handleLoadedMetadata = useCallback(() => {
     const video = videoRef.current
@@ -225,8 +293,6 @@ export function useMovieBuddy(options: UseMovieBuddyOptions): UseMovieBuddyResul
   const handleError = useCallback(() => {
     const video = videoRef.current
     const code = video?.error?.code
-    // When the media element has <source> children the error is reported
-    // through the network state, not through `error`.
     const noSource = video?.networkState === 3
     setPlayer((current) => ({
       ...current,
@@ -269,14 +335,17 @@ export function useMovieBuddy(options: UseMovieBuddyOptions): UseMovieBuddyResul
     }
   }, [])
 
-  const seekTo = useCallback((seconds: number) => {
-    const video = videoRef.current
-    if (!video) return
-    video.currentTime = Math.max(0, seconds)
-    setPlayer((current) => ({ ...current, currentTime: video.currentTime }))
-    // A seek resets the cue tracker so the new position is evaluated fresh.
-    lastCueIndexRef.current = -1
-  }, [])
+  const seekTo = useCallback(
+    (seconds: number) => {
+      const video = videoRef.current
+      if (!video) return
+      video.currentTime = Math.max(0, seconds)
+      setPlayer((current) => ({ ...current, currentTime: video.currentTime }))
+      // The moment moved: re-evaluate rather than reason about the old one.
+      void evaluate()
+    },
+    [evaluate],
+  )
 
   const seekBy = useCallback(
     (seconds: number) => {
@@ -303,6 +372,7 @@ export function useMovieBuddy(options: UseMovieBuddyOptions): UseMovieBuddyResul
   const deactivate = useCallback(() => {
     setMode('off')
     setQuietUntil(0)
+    inFlightRef.current?.abort()
     speaker.cancel()
     setSpeaking(false)
   }, [speaker])
@@ -312,6 +382,7 @@ export function useMovieBuddy(options: UseMovieBuddyOptions): UseMovieBuddyResul
       setMode('quiet')
       setQuietUntil(Date.now() + ms)
       setNow(Date.now())
+      inFlightRef.current?.abort()
       speaker.cancel()
       setSpeaking(false)
     },
@@ -325,33 +396,35 @@ export function useMovieBuddy(options: UseMovieBuddyOptions): UseMovieBuddyResul
   }, [])
 
   const askWhatHappened = useCallback(() => {
-    const answer = answerWhatJustHappened(contextRef.current, player.currentTime)
+    const video = videoRef.current
+    const currentTime = video ? video.currentTime : player.currentTime
+    const answer = answerWhatJustHappened(cues, currentTime)
     setLastAnswer(answer)
     trySpeak(answer.say)
     return answer
-  }, [player.currentTime, trySpeak])
+  }, [cues, player.currentTime, trySpeak])
 
   const askExplain = useCallback(() => {
-    const spoken = contextRef.current.filter(
-      (cue) => player.currentTime - cue.end <= 20 && cue.end > 0 && cue.text.trim().length > 0,
-    )
-    const answer: GroundedAnswer =
-      spoken.length === 0
-        ? {
-            say: 'I cannot explain that moment. There is no caption line covering it, and I do not analyse the picture.',
-            basis: [],
-            unavailable: true,
-            reason: 'No caption cue covers the moment, and this build has no visual analysis.',
-          }
-        : {
-            say: `From the captions: ${spoken.map((cue) => cue.text.trim()).join(' ')} I am reading the subtitle track, not the picture.`,
-            basis: spoken,
-            unavailable: false,
-          }
+    const video = videoRef.current
+    const currentTime = video ? video.currentTime : player.currentTime
+    const answer = explainTheMoment(cues, currentTime)
     setLastAnswer(answer)
     trySpeak(answer.say)
     return answer
-  }, [player.currentTime, trySpeak])
+  }, [cues, player.currentTime, trySpeak])
+
+  /** Replace the caption track - used when the viewer loads their own file. */
+  const handleCueChange = useCallback(
+    (next: MediaCue[]) => {
+      setCues(next)
+      engine.reset()
+      setRemarks([])
+      setLastRemark(null)
+      setLastDecision(null)
+      void evaluate()
+    },
+    [engine, evaluate],
+  )
 
   const trackUrl = useMemo(() => {
     if (cues.length === 0) return null
@@ -365,25 +438,30 @@ export function useMovieBuddy(options: UseMovieBuddyOptions): UseMovieBuddyResul
     }
   }, [trackUrl])
 
-
   const quietRemainingMs = Math.max(0, quietUntil - now)
+
+  const buddy: MovieBuddyState = {
+    mode,
+    quietUntil,
+    quietRemainingMs,
+    remarks,
+    lastRemark,
+    lastDecision,
+    lastAnswer,
+    source,
+    providerId,
+    speaking,
+    alignment,
+  }
 
   return {
     videoRef,
+    attachVideo,
     player,
-    buddy: {
-      mode,
-      quietUntil,
-      quietRemainingMs,
-      reactions,
-      lastReaction,
-      lastAnswer,
-      lastTrigger: lastReaction?.reason ?? null,
-      speaking,
-      contextSize: contextRef.current.length,
-    },
+    buddy,
     activeCueIndex,
     activeCueText: activeCue?.text ?? '',
+    cues,
     trackUrl,
     trySpeak,
     activate,
@@ -402,7 +480,7 @@ export function useMovieBuddy(options: UseMovieBuddyOptions): UseMovieBuddyResul
     handleWaiting,
     handlePlaying,
     handleEnded,
-    lastGate,
+    handleCueChange,
     stageAspect: asset?.aspect_ratio ?? '16 / 9',
   }
 }

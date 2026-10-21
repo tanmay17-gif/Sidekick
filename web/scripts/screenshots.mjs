@@ -16,14 +16,14 @@ await page.waitForSelector('.voice-surface')
 await page.waitForTimeout(500)
 await page.screenshot({ path: `${outDir}/01-ask.png` })
 
-await page.getByLabel('Your request').fill('play a song on spotify and then start a chess game')
+await page.getByLabel('Your request').fill('take a note that the screenshot check ran')
 await page.getByRole('button', { name: 'Send' }).click()
-await page.waitForSelector('.action-card')
+await page.waitForSelector('.task-card')
 await page.waitForTimeout(500)
 await page.screenshot({ path: `${outDir}/02-ask-answer.png` })
 
-await page.getByRole('button', { name: 'Control room' }).click()
-await page.waitForSelector('.arch')
+await page.getByRole('button', { name: 'Developer' }).click()
+await page.waitForSelector('.arch, .control-room')
 await page.waitForTimeout(500)
 await page.screenshot({ path: `${outDir}/03-control-room.png` })
 await page.screenshot({ path: `${outDir}/03b-control-room-full.png`, fullPage: true })
@@ -34,13 +34,18 @@ await page.waitForTimeout(900)
 await page.screenshot({ path: `${outDir}/04-movie-buddy.png` })
 
 const video = page.locator('video')
+// A gap between two caption lines: that is where the companion speaks.
 await video.evaluate((element) => {
   const media = element
-  media.currentTime = 34
+  media.currentTime = 15.5
   media.dispatchEvent(new Event('timeupdate'))
 })
 await page.waitForTimeout(700)
 await page.screenshot({ path: `${outDir}/05-movie-buddy-reacting.png` })
+
+await page.getByRole('button', { name: 'Why did Sidekick react?' }).click()
+await page.waitForTimeout(500)
+await page.screenshot({ path: `${outDir}/05b-movie-buddy-why.png` })
 
 await page.setViewportSize({ width: 430, height: 900 })
 await page.getByRole('button', { name: 'Ask Sidekick' }).click()

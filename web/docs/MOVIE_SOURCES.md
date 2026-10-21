@@ -197,9 +197,16 @@ YouTube), desktop applications, system audio, or the picture itself. This
 build has **no visual analysis** - the interface says so on the Movie Buddy
 surface and in every answer the companion gives.
 
-A user can also open a video file from their own machine (`Open a file`). Such
-a file plays in the same player but has **no caption track**, so the companion
-has nothing to ground a comment in and says so rather than inventing one.
+A user can also open a video file from their own machine (`Open a video`) and
+attach a subtitle file to it (`Load subtitles`, `.srt` or `.vtt`). The subtitle
+file is parsed **in the browser** and is never uploaded. With those captions
+the companion has real cues to read and can remark on them.
+
+If the loaded captions stop long before the film ends, the interface reports
+that the subtitles may not match that copy of the film, because a remark based
+on the wrong captions would be worse than no remark at all. A video with no
+caption track gets a clear notice that the companion has nothing to read,
+together with the "load subtitles" affordance.
 
 ---
 
@@ -208,6 +215,9 @@ has nothing to ground a comment in and says so rather than inventing one.
 ```bash
 # the bundled film really plays and the captions follow the media clock
 npx playwright test tests/e2e/app.spec.ts -g "really plays the bundled film"
+
+# the companion remarks in the gap after a line and explains why
+npx playwright test tests/e2e/app.spec.ts -g "remarks in the gap"
 
 # the codec situation, for the record
 #   chrome / edge          -> MP4 (H.264)

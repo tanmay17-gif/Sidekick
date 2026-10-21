@@ -111,16 +111,35 @@ with the app so it never depends on a third-party host. The caption track is
 the film's own narration.
 
 **Step 3 - watch the companion stay quiet.** For the first seconds nothing
-happens. That is the point: the companion has a speaking budget of three
-remarks a minute, a twelve-second cooldown, and it never talks over a caption
-line.
+happens. That is the point: the companion speaks in the **gaps between the
+caption lines**, never over a line, with a speaking budget of three remarks a
+minute, a twelve-second cooldown and a rate limit on the model provider.
 
-**Step 4 - see a real reaction.** Around **0:34** the narration says
-*"Meet all these nice people. Bert the Turtle."* The companion reacts, and
-click **Why did Sidekick react?** to see the rule that fired and the caption
-line with its timestamp.
+**Step 4 - see a real remark.** Around **0:14** the narration says *"remember
+to do the same thing. That's what this film is all about."* The companion
+remarks in the gap after that line, and click **Why did Sidekick react?** to
+see the observable property of the caption that triggered it, the line with its
+timestamp, and **where the words came from**.
 
-**Step 5 - ask it a question.** Say:
+**Step 5 - show the honesty of the source.** The Movie Buddy panel always names
+the commentary source. With no model provider configured it reads
+**local heuristic** and says *"No model provider is configured, so Sidekick
+uses a local heuristic that only reports what it can observe in the
+captions."* With `VITE_SIDECKICK_COMMENTARY_ENDPOINT` set it reads **model**.
+A remark is never presented as model-written unless a model wrote it.
+
+**Step 6 - show that it is not a script.** Switch the film to *Letter V* (a
+different film, different captions) and the remarks change, because they come
+from the captions that are playing now. There is no per-film list of lines
+anywhere in the code.
+
+**Step 7 - use your own video.** Click **Open a video** and pick a file from
+this machine, then **Load subtitles** and pick its `.srt` or `.vtt`. The
+captions are parsed in the browser - nothing is uploaded - and the companion
+now has real cues to read for *that* film. Load a subtitle file for the wrong
+film and the interface warns that the captions may not match.
+
+**Step 8 - ask it a question.** Say:
 
 > "What just happened?"
 
@@ -128,18 +147,19 @@ The answer quotes the captions from the last 45 seconds and says it is reading
 the subtitle track. Ask about a moment with no captions and it says plainly
 that it cannot know.
 
-**Step 6 - silence it.** Say:
+**Step 9 - silence it.** Say:
 
 > "Be quiet for a bit."
 
 The commentary stops immediately and the panel counts down the quiet window.
 
-**Step 7 - bring it back.** Say:
+**Step 10 - bring it back.** Say:
 
 > "Resume Movie Buddy."
 
-**Step 8 - drive the player.** Say "Pause the movie." or "Go back 30 seconds."
-and the real media clock moves.
+**Step 11 - drive the player.** Say "Pause the movie." or "Go back 30 seconds."
+and the real media clock moves. The companion re-evaluates the moment after a
+seek instead of talking about the moment that has moved on.
 
 ### If the media fails
 
@@ -169,5 +189,7 @@ keeps working.
   is the same request, the same action and the same ids in the other.
 - The companion events are tied to real media time and real caption cues, and
   the companion explains its own trigger.
+- The companion reads captions, not the picture, and it says which of the two
+  wrote its words.
 - The browser is honest about what it cannot do: no voice engine, no
   microphone, no provider, no backend.
