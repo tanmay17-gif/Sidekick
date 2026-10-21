@@ -225,7 +225,7 @@ class CapabilityCatalog:
         Ties are broken by the tool name, so the result does not depend on the
         order the adapters happened to be registered in.
         """
-        tokens = _tokenize(text)
+        tokens = tokenize(text)
         if not tokens:
             return None, 0.0
         best: tuple[str, float] | None = None
@@ -252,7 +252,7 @@ class CapabilityCatalog:
         spec = self.tools.get(tool)
         if spec is None:
             return 0.0
-        tokens = _tokenize(text)
+        tokens = tokenize(text)
         if not tokens:
             return 0.0
         best = 0.0
@@ -267,8 +267,11 @@ class CapabilityCatalog:
 
         Only a single typo in a single word counts, and only when the match
         is unambiguous. A wrong destination is worse than none.
+
+        Short words are excluded: "at" is one edit away from "yt", but that
+        is not a typo, it is a different word.
         """
-        tokens = _tokenize(text)
+        tokens = tokenize(text)
         if not tokens:
             return None
         candidates: list[str] = []
@@ -280,7 +283,11 @@ class CapabilityCatalog:
                     alias_words = alias.lower().split()
                     if len(alias_words) != 1:
                         continue
+                    if len(alias_words[0]) < MIN_TYPO_LENGTH:
+                        continue
                     for token in tokens:
+                        if len(token) < MIN_TYPO_LENGTH:
+                            continue
                         if _edit_distance(token, alias_words[0]) == 1:
                             candidates.append(destination)
                             break
@@ -306,14 +313,14 @@ class CapabilityCatalog:
         comparison cannot tell "find a restaurant" from "find a movie" - a
         suggestion that is wrong is worse than no suggestion.
         """
-        tokens = _tokenize(text)
+        tokens = tokenize(text)
         if not tokens:
             return []
         found: list[tuple[str, str, int]] = []
         for spec in self.tools.values():
             best: tuple[str, int] | None = None
             for alias in spec.aliases:
-                words = _content_words(alias)
+                words = content_words(alias)
                 if len(words) < 2:
                     continue
                 missing = [word for word in words if word not in tokens]
@@ -333,7 +340,7 @@ class CapabilityCatalog:
         A single typo counts ("open spotfy"), as long as the match is
         unambiguous.
         """
-        tokens = _tokenize(text)
+        tokens = tokenize(text)
         best: tuple[str, float] | None = None
         for spec in self.tools.values():
             for dest in spec.destinations:
@@ -396,6 +403,10 @@ _STOPWORDS = frozenset(
 )
 
 
+#: A typo is only recognised in words of at least this length.
+MIN_TYPO_LENGTH = 4
+
+
 def _edit_distance(left: str, right: str) -> int:
     """The Levenshtein distance of two short words."""
     if left == right:
@@ -426,13 +437,13 @@ def _singular(word: str) -> str:
     return word
 
 
-def _tokenize(text: str) -> list[str]:
+def tokenize(text: str) -> list[str]:
     """The content words of a text, in order."""
     words = re.findall(r"[a-z0-9']+", text.lower())
     return [_singular(word) for word in words if word not in _STOPWORDS]
 
 
-def _content_words(text: str) -> list[str]:
+def content_words(text: str) -> list[str]:
     """The words of a text that carry meaning."""
     return [
         _singular(word)
@@ -453,7 +464,7 @@ def _alias_score(
     in order, with at most one filler word in between. The score grows with
     the number of content words, so a specific alias beats a generic one.
     """
-    alias_tokens = _content_words(alias)
+    alias_tokens = content_words(alias)
     if not alias_tokens:
         return 0.0
 

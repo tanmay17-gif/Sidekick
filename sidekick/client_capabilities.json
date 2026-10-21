@@ -1,11 +1,11 @@
 {
   "owner": "agent3",
-  "note": "Capabilities that the browser client executes locally. The core plans them and reports them honestly; the client runs them and reports the outcome back through POST /v1/actions/{id}/complete.",
+  "note": "Capabilities that the browser client executes locally. The core plans them and reports them honestly; the client runs them and reports the outcome back through POST /v1/actions/{id}/complete. Agent 3 owns this file - the core only reads it.",
   "capabilities": [
     {
       "id": "movie.play",
       "label": "play a movie",
-      "detail": "Plays the bundled open-licensed film with the real subtitle timing, and the movie companion reacts to what is actually said.",
+      "detail": "The browser client plays the movie. The core plans it and waits for the client's report; it does not play anything itself.",
       "aliases": [
         "play a movie",
         "watch a movie",
@@ -26,7 +26,7 @@
     {
       "id": "media.play",
       "label": "play music",
-      "detail": "Plays music in the client and keeps the playback controls in sync with the voice conversation.",
+      "detail": "The browser client plays the music. The core plans it and waits for the client's report; it does not play anything itself.",
       "aliases": [
         "play some music",
         "play music",
@@ -48,7 +48,7 @@
     {
       "id": "game.start",
       "label": "play a game",
-      "detail": "Starts one of the local games, for example chess.",
+      "detail": "The browser client starts the game. The core plans it and waits for the client's report; it does not start anything itself.",
       "aliases": [
         "start a game",
         "play a game",

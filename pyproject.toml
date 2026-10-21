@@ -33,7 +33,10 @@ sidekick = "sidekick.api.app:main"
 sidekick-execution = "sidekick_execution.__main__:main"
 
 [tool.setuptools.packages.find]
-include = ["sidekick*"]
+# Both Python distributions of this project: the core brain and the
+# execution service. `scripts/check_packaging.py` verifies that a built
+# wheel really contains both.
+include = ["sidekick*", "sidekick_execution*"]
 
 [tool.setuptools.package-data]
 sidekick = ["api/static/*"]

@@ -421,7 +421,10 @@ class WebSearchTool:
         cancellable=False,
         label="search the web",
         speech_template="Searching for {query}.",
-        detail="Runs a real web search and opens the results.",
+        detail=(
+            "Opens the real search results page for a query. It does not read, "
+            "summarise or verify the results - that needs a content fetch."
+        ),
         arguments=(
             ArgumentSpec(
                 name="query",
@@ -480,7 +483,14 @@ class WebSearchTool:
             )
         return ToolResult(
             ok=True,
-            data={"query": query, "engine": engine, "url": url, "opened": True},
+            data={
+                "query": query,
+                "engine": engine,
+                "url": url,
+                "opened": True,
+                "kind": "search_results_page",
+                "note": "the results page is open; the content was not read",
+            },
         )
 
     def cancel(self, action_id: str) -> bool:

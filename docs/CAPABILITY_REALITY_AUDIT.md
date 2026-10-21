@@ -165,9 +165,36 @@ The client declaration is deliberately **not** an executable capability. The cor
 actions `awaiting_client` and never reports them as done until the client reports the real outcome
 through `POST /v1/actions/{id}/complete`.
 
+### The trust boundary, stated plainly
+
+- The core **plans** a client capability, applies the safety policy and asks for the approval.
+- The browser client **runs** it and reports what happened.
+- The core **records** the report. It cannot independently verify that a browser really played a
+  track or really started a game - the client's report is the only evidence. That is why the
+  capability report says the client side is `client` and never `live`, and why the spoken line for
+  a pending client action is "The app will play ..." rather than "Playing ...".
+- A client action that is never reported fails after 120 s with `client_timeout` instead of
+  hanging. A failed, cancelled or timed-out client action is never announced as successful.
+
 ---
 
-## 4. The gaps that matter, in order
+## 4. Explicitly not implemented, not configured or not verified
+
+Named here so that no demo claims them:
+
+| Item | State | Why |
+|---|---|---|
+| **Alexa+ integration** | **NOT_IMPLEMENTED** | There is no Alexa+ skill, no account and no verified access. The voice experience in this repository is the browser Web Speech API. It is not Alexa+. |
+| **AWS Bedrock** | **NOT_CONFIGURED** | The decision model is the self-hosted `convaiinnovations/laya` checkpoint. No Bedrock model is configured, called or tested. |
+| **AWS deployment** | **NOT_IMPLEMENTED** | The core runs as a local process. No AWS account, no deployment, no infrastructure. |
+| **A real coding provider** | **NOT_CONFIGURED** | Agent 2's executor is real and verified, but no `SIDEKICK_LLM_API_KEY` and no authorized coding CLI exist on any machine, so the *model that decides the change* has never run. |
+| **A content fetch behind the web search** | **NOT_IMPLEMENTED** in the core | `web.search` opens the real results page and says so; it does not read, summarise or verify the content. Agent 2's `web.fetch` is the piece that would. |
+| **Flight, food and booking providers** | **NOT_IMPLEMENTED**, no owner | They need a real provider, an account and a money policy. The core refuses them honestly. |
+| **Reminders that reach a phone** | **NOT_IMPLEMENTED** | The reminder lives in the running process and is lost on a restart. The result says so. |
+
+---
+
+## 5. The gaps that matter, in order
 
 1. **The model was confidently wrong and the product believed it.** Fixed in this branch: the
    decision model may no longer name a capability the utterance does not mention

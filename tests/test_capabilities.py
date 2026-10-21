@@ -339,17 +339,37 @@ def test_a_client_failure_is_recorded_as_a_failure(engine: DecisionEngine) -> No
 def test_the_capability_report_separates_the_server_the_client_and_the_missing(
     client,
 ) -> None:
+    """The server side keeps the state vocabulary the browser already renders.
+
+    The browser client has a fixed map of states, so a capability the *client*
+    runs is reported in its own list instead of inventing a new state value.
+    """
     body = client.get("/api/v1/capabilities").json()
 
     by_id = {item["id"]: item for item in body["capabilities"]}
     assert by_id["note.write"]["state"] == "live"
-    assert by_id["media.play"]["state"] == "client"
-    assert by_id["media.play"]["execution_target"] == "client"
-    assert by_id["media.play"]["owner"] == "agent3"
+    # The server side only reports what the server runs.
+    assert "media.play" not in by_id
+
+    client_side = {item["id"]: item for item in body["client_capabilities"]}
+    assert client_side["media.play"]["state"] == "client"
+    assert client_side["media.play"]["execution_target"] == "client"
+    assert client_side["media.play"]["owner"] == "agent3"
 
     tools = {item["tool"]: item for item in body["tools"]}
     assert tools["note.write"]["status"] == "REAL"
-    assert tools["media.play"]["status"] == "NOT_IMPLEMENTED"
+    # A client capability is not in the server's tool report.
+    assert "media.play" not in tools
+
+
+def test_the_server_states_stay_inside_the_vocabulary_the_browser_renders(
+    client,
+) -> None:
+    """Agent 3's UI maps a fixed set of states; the core must not exceed it."""
+    body = client.get("/api/v1/capabilities").json()
+    known = {"live", "simulated", "unavailable", "unconfigured", "disconnected"}
+
+    assert {item["state"] for item in body["capabilities"]} <= known
 
 
 def test_every_destination_opens_a_real_url(engine: DecisionEngine, browser: list[str]) -> None:

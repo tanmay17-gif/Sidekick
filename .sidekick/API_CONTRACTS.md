@@ -207,7 +207,9 @@ The response carries both vocabularies the team uses, computed from the same sou
   "contract_version": "v1",
   "mode": "live",
   "capabilities": [
-    { "id": "note.write", "label": "write a note", "detail": "...", "state": "live", "owner": "core", "execution_target": "server" },
+    { "id": "note.write", "label": "write a note", "detail": "...", "state": "live", "owner": "core", "execution_target": "server" }
+  ],
+  "client_capabilities": [
     { "id": "media.play", "label": "play music", "detail": "...", "state": "client", "owner": "agent3", "execution_target": "client" }
   ],
   "tools": [
@@ -232,9 +234,13 @@ The response carries both vocabularies the team uses, computed from the same sou
 }
 ```
 
-- `capabilities[].state` uses the browser vocabulary `live | simulated | unavailable | unconfigured |
-  disconnected`, plus `client` for a capability the browser client executes.
-- `tools[].status` uses the execution vocabulary `REAL | SIMULATED | NOT_CONFIGURED | NOT_IMPLEMENTED`.
+- `capabilities[]` lists the **server side** only, with the state vocabulary the browser already
+  renders: `live | simulated | unavailable | unconfigured | disconnected`. It never grows a new
+  value, so an existing client keeps working unchanged.
+- `client_capabilities[]` lists the capabilities the **browser client** runs. Their state is
+  `client` and their `owner` says who implements them. They are not in `capabilities[]` and not
+  in `tools[]`: a server tool report would either claim they work or claim they do not exist.
+- `tools[]` uses the execution vocabulary `REAL | SIMULATED | NOT_CONFIGURED | NOT_IMPLEMENTED`.
 - The UI renders these verbatim; it never upgrades a state on its own. A capability without an
   adapter is `unavailable` / `NOT_IMPLEMENTED`, never `live`.
 

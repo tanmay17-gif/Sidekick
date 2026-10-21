@@ -37,6 +37,7 @@ from .catalog import (
     ARG_STRING,
     CAPTURE_AUTO,
     CAPTURE_EXCEPT_WHEN,
+    CAPTURE_WHEN,
     CAPTURE_NONE,
     CAPTURE_QUOTED,
     CAPTURE_WHEN,
@@ -367,6 +368,14 @@ class DecisionEngine:
                 support_text = correction.preceding
 
         decision = self._anchor_to_utterance(decision, support_text, session)
+        anchor = decision.details.get("anchor")
+        if anchor:
+            # The interpretation that is used came from the deterministic
+            # layer, and the response has to say so.
+            model_info = model_info.model_copy(deep=True)
+            model_info.source = DecisionSource.RULE
+            model_info.fallback_used = True
+            model_info.fallback_reason = str(anchor.get("reason") or "resolved deterministically")
         return self._finish_segment(
             segment, session, request, decision, model_info, correction, text
         )
@@ -374,54 +383,67 @@ class DecisionEngine:
     def _anchor_to_utterance(
         self, decision: Decision, text: str, session: SessionState
     ) -> Decision:
-        """Keep the decision model inside what the utterance actually says.
+        """Keep the decision inside what the utterance actually says.
 
         Measured with the real model: on a *new* answer space the checkpoint
         answers confidently but arbitrarily - "order dinner for me" and
-        "xyzzy plugh" both came back as "read my notes". Its confidence is
-        not calibrated for an answer space it was not trained on (the library
-        says so itself), so it is never allowed to introduce a capability the
-        utterance does not mention.
+        "xyzzy plugh" both came back as "read my notes", and the engine
+        reported success. Its confidence is not calibrated for this answer
+        space (the library says so itself), so it is never allowed to
+        introduce a capability the utterance does not mention.
 
         The model may still choose *between* the capabilities the utterance
         supports, and that is where it earns its place.
         """
-        if decision.source is not DecisionSource.MODEL:
-            return decision
         tool = decision.tool
-        if not tool or self._is_control(tool):
+        if tool and self._is_control(tool):
             return decision
 
         catalog = self.registry.catalog
-        support = catalog.tool_support(text, tool)
-        if support > 0:
-            # The utterance mentions this capability. Keep the model's choice.
-            return decision
 
-        # The model named a capability the utterance never mentions.
-        candidate, score = catalog.match_tool(text)
-        if candidate is None:
-            # A destination that only one capability owns identifies that
-            # capability on its own: "no, I meant Spotify" is an "open".
-            candidate, score = self._capability_from_destination(text)
-        if candidate and candidate != tool and not self._is_control(candidate):
+        if decision.source is DecisionSource.MODEL and tool:
+            if catalog.tool_support(text, tool) > 0:
+                # The utterance mentions this capability. Keep the model's choice.
+                return decision
+            # The model named a capability the utterance never mentions.
+            candidate, score = self._candidate_for(text)
             decision.details["anchor"] = {
                 "rejected_tool": tool,
-                "reason": "the utterance does not mention that capability",
+                "reason": "the decision model named a capability the utterance does not mention",
                 "chosen": candidate,
             }
             decision.tool = candidate
-            decision.confidence = max(decision.confidence, score)
+            decision.confidence = max(decision.confidence, score) if candidate else 0.0
             return decision
 
-        decision.details["anchor"] = {
-            "rejected_tool": tool,
-            "reason": "the utterance does not mention that capability",
-            "chosen": None,
-        }
-        decision.tool = None
-        decision.confidence = 0.0
+        if not tool:
+            # Nobody named a capability: the deterministic matcher decides.
+            candidate, score = self._candidate_for(text)
+            if candidate:
+                decision.details["anchor"] = {
+                    "rejected_tool": None,
+                    "reason": "the capability was resolved by the deterministic matcher",
+                    "chosen": candidate,
+                }
+                decision.tool = candidate
+                decision.confidence = max(decision.confidence, score)
         return decision
+
+    def _candidate_for(self, text: str) -> tuple[str | None, float]:
+        """The capability the utterance supports, if any.
+
+        The order is deliberate: an alias match wins, then a destination that
+        only one capability owns, then a wall-clock time that only one
+        capability takes.
+        """
+        catalog = self.registry.catalog
+        candidate, score = catalog.match_tool(text)
+        if candidate:
+            return candidate, score
+        candidate, score = self._capability_from_destination(text)
+        if candidate:
+            return candidate, score
+        return self._capability_from_time(text)
 
     def _finish_segment(
         self,
@@ -663,6 +685,61 @@ class DecisionEngine:
             except Exception:  # noqa: BLE001 - a sweep must never kill the process
                 pass
             self._stop_sweeper.wait(CLIENT_SWEEP_INTERVAL_SECONDS)
+
+    def _is_client_action(self, action: Action) -> bool:
+        """Does the browser client execute this capability?"""
+        spec = self.registry.spec(action.tool)
+        return spec is not None and spec.execution_target == "client"
+
+    def _await_client(
+        self, action: Action, session: SessionState, events: list[Event]
+    ) -> Action:
+        """Hand the action to the browser client and wait for its report.
+
+        The core does not run it and does not claim it ran it. The action
+        stays ``pending`` until the client reports the real outcome, and it
+        fails with ``client_timeout`` if the client never reports.
+        """
+        spec = self.registry.spec(action.tool)
+        action.state = ActionStatus.PENDING
+        action.result = {
+            "execution_target": "client",
+            "status": "awaiting_client",
+            "capability": action.tool,
+            "client_deadline": time.time() + CLIENT_ACTION_TIMEOUT_SECONDS,
+        }
+        action.touch()
+        events.append(
+            Event(
+                type="action.awaiting_client",
+                action_id=action.action_id,
+                message=f"{action.tool} is executed by the app",
+                data={
+                    "capability": action.tool,
+                    "deadline_seconds": CLIENT_ACTION_TIMEOUT_SECONDS,
+                },
+            )
+        )
+        self._ensure_client_sweeper()
+        return action
+
+    def _capability_from_time(self, text: str) -> tuple[str | None, float]:
+        """The capability a wall-clock time names.
+
+        "tomorrow at 9" names no action, but it names a *moment*, and exactly
+        one capability in the catalog takes a moment. That is the capability
+        the user means.
+        """
+        if not find_when_expression(text):
+            return None, 0.0
+        owners = [
+            spec.name
+            for spec in self.registry.catalog
+            if any(argument.capture == CAPTURE_WHEN for argument in spec.arguments)
+        ]
+        if len(owners) == 1:
+            return owners[0], 0.5
+        return None, 0.0
 
     def _capability_from_destination(self, text: str) -> tuple[str | None, float]:
         """The capability a mentioned destination identifies on its own.
@@ -953,32 +1030,9 @@ class DecisionEngine:
                 affected.extend(self._run_control_action(action, session, events))
                 session.add_action(action)
                 continue
-            spec = self.registry.spec(action.tool)
-            if spec is not None and spec.execution_target == "client":
-                # The browser client runs this one. The core plans it and
-                # waits for the client to report the real outcome - with a
-                # deadline, so it cannot stay pending forever.
-                action.state = ActionStatus.PENDING
-                action.result = {
-                    "execution_target": "client",
-                    "status": "awaiting_client",
-                    "capability": spec.name,
-                    "client_deadline": time.time() + CLIENT_ACTION_TIMEOUT_SECONDS,
-                }
-                action.touch()
-                events.append(
-                    Event(
-                        type="action.awaiting_client",
-                        action_id=action.action_id,
-                        message=f"{spec.name} is executed by the app",
-                        data={
-                            "capability": spec.name,
-                            "deadline_seconds": CLIENT_ACTION_TIMEOUT_SECONDS,
-                        },
-                    )
-                )
+            if self._is_client_action(action):
+                self._await_client(action, session, events)
                 session.add_action(action)
-                self._ensure_client_sweeper()
                 continue
             self._execute_action(action, session, events)
             session.add_action(action)
@@ -1048,7 +1102,13 @@ class DecisionEngine:
     # ------------------------------------------------------------------
 
     def capability_inventory(self) -> list[dict[str, Any]]:
-        """Everything the product can do, with the truth about each one."""
+        """Everything the product can do, with the truth about each one.
+
+        The ``state`` values here are the *core's* own vocabulary: ``live``
+        for a capability a real adapter runs, ``client`` for a capability the
+        browser client runs, and ``unavailable`` for one that is declared but
+        has no adapter.
+        """
         inventory: list[dict[str, Any]] = []
         for spec in self.registry.catalog:
             available = self.registry.is_available(spec.name)
@@ -1072,6 +1132,47 @@ class DecisionEngine:
                 }
             )
         return inventory
+
+    def server_capabilities(self) -> list[dict[str, Any]]:
+        """The capabilities a real adapter on the server runs.
+
+        The browser client renders this list with a fixed set of states
+        (``live``, ``simulated``, ``unavailable``, ``unconfigured``,
+        ``disconnected``), so the server side keeps to that vocabulary and the
+        client side is reported separately.
+        """
+        capabilities: list[dict[str, Any]] = []
+        for spec in self.registry.catalog:
+            if spec.execution_target == "client":
+                continue
+            available = self.registry.is_available(spec.name)
+            capabilities.append(
+                {
+                    "id": spec.name,
+                    "state": "live" if available else "unavailable",
+                    "detail": spec.detail or spec.description,
+                    "owner": spec.owner,
+                    "execution_target": spec.execution_target,
+                }
+            )
+        return capabilities
+
+    def client_capabilities(self) -> list[dict[str, Any]]:
+        """The capabilities the browser client runs."""
+        capabilities: list[dict[str, Any]] = []
+        for spec in self.registry.catalog:
+            if spec.execution_target != "client":
+                continue
+            capabilities.append(
+                {
+                    "id": spec.name,
+                    "state": "client",
+                    "detail": spec.detail or spec.description,
+                    "owner": spec.owner,
+                    "execution_target": spec.execution_target,
+                }
+            )
+        return capabilities
 
     def _capability_message(self, inventory: list[dict[str, Any]]) -> str:
         """What the product can do, told honestly.
@@ -1139,6 +1240,11 @@ class DecisionEngine:
             action.state = ActionStatus.RUNNING
             action.result = dict(result.data)
             action.touch()
+            # The work really started, so a follow-up ("actually, tomorrow
+            # at 9") can use the same capability and its arguments.
+            session.last_tool = action.tool
+            session.last_arguments = dict(action.arguments)
+            session.last_intent = action.tool
             task.state = ActionStatus.RUNNING
             task.touch()
             events.append(
@@ -1503,7 +1609,12 @@ class DecisionEngine:
             session.log_event(events[-1])
             return action
 
-        self._execute_action(action, session, events)
+        if self._is_client_action(action):
+            # The approval released the action; the browser client still runs
+            # it and reports the outcome.
+            self._await_client(action, session, events)
+        else:
+            self._execute_action(action, session, events)
         for event in events:
             session.log_event(event)
         return action
@@ -1721,6 +1832,12 @@ class DecisionEngine:
                     return message
                 phrase = self._action_phrase(action)
                 if phrase:
+                    if self._is_client_action(action):
+                        # The core did not run it and does not know whether it
+                        # worked: say who does.
+                        if action.state is ActionStatus.SUCCEEDED:
+                            return "Done."
+                        return "The app will " + phrase[0].lower() + phrase[1:]
                     if corrected:
                         return f"{phrase.rstrip('.')} instead."
                     return phrase

@@ -62,6 +62,16 @@ def create_app(engine: DecisionEngine | None = None) -> FastAPI:
     if static_dir.exists():
         app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
 
+    # The real demo is the browser client (Agent 3's `web/`). When it has
+    # been built, the core serves it - so a demo never accidentally shows
+    # only the backend's placeholder page. The build is Agent 3's; the core
+    # only serves it.
+    web_dist = Path(__file__).resolve().parents[2] / "web" / "dist"
+    if (web_dist / "index.html").exists():
+        assets = web_dist / "assets"
+        if assets.is_dir():
+            app.mount("/assets", StaticFiles(directory=str(assets)), name="web-assets")
+
     # -- error envelope ---------------------------------------------------
 
     @app.exception_handler(SidekickError)
@@ -131,20 +141,19 @@ def create_app(engine: DecisionEngine | None = None) -> FastAPI:
         both are computed from the same source of truth - the engine's
         inventory.
         """
-        inventory = engine.capability_inventory()
-        by_id = {item["id"]: item for item in inventory}
+        server = engine.server_capabilities()
+        client = engine.client_capabilities()
+        by_id = {item["id"]: item for item in server}
 
         tool_items: list[dict[str, Any]] = []
         status_counts: dict[str, int] = {}
         for spec in engine.registry.catalog:
-            item = by_id.get(spec.name, {})
-            state = item.get("state", "unavailable")
-            if state == "live":
-                status = "REAL"
-            elif state == "client":
-                status = "NOT_IMPLEMENTED"
-            else:
-                status = "NOT_IMPLEMENTED"
+            if spec.execution_target == "client":
+                # The client side has its own list; a server tool report
+                # would either claim it works or claim it does not exist.
+                continue
+            state = by_id.get(spec.name, {}).get("state", "unavailable")
+            status = "REAL" if state == "live" else "NOT_IMPLEMENTED"
             status_counts[status] = status_counts.get(status, 0) + 1
             tool_items.append(
                 {
@@ -154,7 +163,7 @@ def create_app(engine: DecisionEngine | None = None) -> FastAPI:
                     "approval_required": spec.requires_approval,
                     "risk_level": spec.risk.value,
                     "status": status,
-                    "status_detail": item.get("detail", ""),
+                    "status_detail": by_id.get(spec.name, {}).get("detail", ""),
                     "simulated": False,
                     "execution_target": spec.execution_target,
                     "owner": spec.owner,
@@ -164,7 +173,8 @@ def create_app(engine: DecisionEngine | None = None) -> FastAPI:
         return {
             "contract_version": CONTRACT_VERSION,
             "mode": "live",
-            "capabilities": inventory,
+            "capabilities": server,
+            "client_capabilities": client,
             "tools": tool_items,
             "tool_count": len(tool_items),
             "status_counts": status_counts,
@@ -356,6 +366,10 @@ def create_app(engine: DecisionEngine | None = None) -> FastAPI:
 
     @app.get("/")
     async def index() -> Any:
+        # The built browser client wins over the placeholder page.
+        client_index = web_dist / "index.html"
+        if client_index.exists():
+            return FileResponse(str(client_index))
         page = static_dir / "index.html"
         if page.exists():
             return FileResponse(str(page))
@@ -375,6 +389,16 @@ def create_app(engine: DecisionEngine | None = None) -> FastAPI:
                 ],
             }
         )
+
+    @app.get("/{path:path}")
+    async def client_routes(path: str) -> Any:
+        """Client side routes of the built browser app (single page app)."""
+        client_index = web_dist / "index.html"
+        if not client_index.exists():
+            raise HTTPException(status_code=404, detail="not found")
+        if path.startswith(("api/", "v1/", "static/", "healthz")):
+            raise HTTPException(status_code=404, detail="not found")
+        return FileResponse(str(client_index))
 
     return app
 

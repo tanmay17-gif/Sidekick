@@ -20,6 +20,8 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from typing import Iterable
 
+from .catalog import content_words, tokenize
+
 # --------------------------------------------------------------------------
 # Normalisation
 # --------------------------------------------------------------------------
@@ -454,6 +456,14 @@ def extract_argument_hints(text: str) -> ArgumentHints:
 
 
 # Leading words that introduce the value of an argument.
+_STOPWORDS = frozenset(
+    {
+        "a", "an", "the", "my", "your", "our", "some", "of", "for", "to",
+        "please", "can", "you", "i", "me", "it", "that", "this", "and",
+        "then", "now", "just",
+    }
+)
+
 _LEADING_FILLER_RE = re.compile(
     r"^(?:that\s+says|that\s+is|that|to|about|for|with|saying|which\s+says|:\s*|-\s*)",
     re.IGNORECASE,
@@ -463,11 +473,15 @@ _PURE_NUMBER_RE = re.compile(r"^[\d\s.:]+$")
 
 
 def extract_remainder(text: str, aliases: "Iterable[str]") -> str | None:
-    """Return the part of ``text`` that follows the first matching alias.
+    """Return the part of ``text`` that follows the matching alias.
 
     This is how a free-text argument ("write a note that the milk is out")
     is captured without hard coding the sentence: the alias decides where
     the value starts.
+
+    The alias does not have to appear word for word. "can you write me a
+    note about the release" contains the alias "write a note" only in its
+    content words, and the value still starts after it.
     """
     lowered = text.lower()
     best_index: int | None = None
@@ -490,7 +504,12 @@ def extract_remainder(text: str, aliases: "Iterable[str]") -> str | None:
             best_alias = alias
             best_length = length
     if best_index is None:
-        return None
+        # The alias only appears in its content words.
+        end_of_alias = _alias_content_end(text, aliases)
+        if end_of_alias is None:
+            return None
+        best_index = end_of_alias
+        best_alias = ""
 
     remainder = text[best_index + len(best_alias) :].strip()
     previous = None
@@ -503,6 +522,57 @@ def extract_remainder(text: str, aliases: "Iterable[str]") -> str | None:
         # "set a timer for 5 minutes" - the remainder is only a duration.
         return None
     return remainder
+
+
+def _alias_content_end(text: str, aliases: "Iterable[str]") -> int | None:
+    """Where the alias ends, when only its content words appear.
+
+    "can you write me a note about x" contains "write a note" in its content
+    words; the value starts after the last of them. The most specific alias
+    (the one with the most content words) wins.
+    """
+    tokens = tokenize(text)
+    if not tokens:
+        return None
+    best: tuple[int, int] | None = None  # (number of words, end offset)
+    for alias in aliases:
+        words = content_words(alias)
+        if len(words) < 2:
+            continue
+        positions: list[int] = []
+        cursor = 0
+        for word in words:
+            try:
+                index = tokens.index(word, cursor)
+            except ValueError:
+                positions = []
+                break
+            positions.append(index)
+            cursor = index + 1
+        if len(positions) < 2:
+            continue
+        span = _word_span(text, positions[-1])
+        if span is None:
+            continue
+        if best is None or len(positions) > best[0]:
+            best = (len(positions), span[1])
+    return best[1] if best else None
+
+
+def _word_span(text: str, token_index: int) -> tuple[int, int] | None:
+    """The character span of the n-th content word in the original text.
+
+    The span is taken from the original word, not from the token: the token
+    is stemmed ("notes" -> "note"), so its length is not the word's length.
+    """
+    seen = 0
+    for match in re.finditer(r"[A-Za-z0-9']+", text):
+        if match.group(0).lower() in _STOPWORDS:
+            continue
+        if seen == token_index:
+            return match.start(), match.end()
+        seen += 1
+    return None
 
 
 @dataclass
