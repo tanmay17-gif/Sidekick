@@ -41,7 +41,9 @@ export default defineConfig({
       stderr: 'pipe',
     },
     {
-      command: `npm run build && npx vite preview --port ${PORT} --strictPort`,
+      // Bind explicitly to 127.0.0.1: on CI runners `localhost` can resolve to
+      // ::1 only, which makes the IPv4 base URL fail with ECONNREFUSED.
+      command: `npm run build && npx vite preview --port ${PORT} --strictPort --host 127.0.0.1`,
       port: PORT,
       reuseExistingServer: !process.env.CI,
       env: { SIDECKICK_API_TARGET: `http://127.0.0.1:${STUB_PORT}` },

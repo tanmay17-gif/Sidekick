@@ -297,7 +297,10 @@ const server = createServer(async (request, response) => {
     })
     sessions.set(sessionId, { segments, pendingAction: null })
 
-    const streaming = url.searchParams.get('stream') === '1'
+    const accepts = String(request.headers.accept ?? '')
+    const hasLongRunningAction = payload.action_plan.some((action) => action.tool === 'coding.run')
+    const wantsStream = accepts.includes('text/event-stream')
+    const streaming = url.searchParams.get('stream') === '1' || (wantsStream && hasLongRunningAction)
 
     if (!streaming) {
       sendJson(response, 200, payload)
@@ -313,13 +316,20 @@ const server = createServer(async (request, response) => {
 
     const coding = payload.action_plan.find((action) => action.tool === 'coding.run')
     if (coding) {
+      // Pace the frames like a real worker would, so the client's live
+      // progress state is actually observable.
+      const pace = Number(process.env.SIDECKICK_STUB_PACE_MS ?? 180)
+      const pause = () => new Promise((resolve) => setTimeout(resolve, pace))
+
       sse(response, { seq: 1, kind: 'progress', message: 'Job queued', at: new Date().toISOString() })
+      await pause()
       sse(response, {
         seq: 2,
         kind: 'progress',
         message: 'Reading the workspace',
         at: new Date().toISOString(),
       })
+      await pause()
       sse(response, {
         seq: 3,
         kind: 'diff',
@@ -328,6 +338,7 @@ const server = createServer(async (request, response) => {
         data: { files: [{ path: 'src/greet.ts', diff: CODING_DIFF }] },
         at: new Date().toISOString(),
       })
+      await pause()
       sse(response, {
         seq: 4,
         kind: 'result',
@@ -338,6 +349,7 @@ const server = createServer(async (request, response) => {
       coding.state = 'succeeded'
       coding.result = { files: [{ path: 'src/greet.ts', diff: CODING_DIFF }] }
       payload.status = 'succeeded'
+      await pause()
     }
 
     sse(response, payload)

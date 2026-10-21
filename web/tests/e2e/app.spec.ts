@@ -72,6 +72,20 @@ test('surfaces a backend failure instead of an empty answer', async ({ page }) =
   await expect(page.locator('.bubble--error')).toContainText(/could not reach|network/i)
 })
 
+test('streams live progress and renders the real diff for a coding job', async ({ page }) => {
+  await page.getByLabel('Your request').fill('write a function that greets the user')
+  await page.getByRole('button', { name: 'Send' }).click()
+
+  // Progress arrives over the event stream, not from a local timer.
+  await expect(page.getByText('Live progress')).toBeVisible({ timeout: 15_000 })
+  await expect(page.getByText('Job queued')).toBeVisible()
+
+  // The patch is the one the backend sent.
+  await expect(page.getByText('unified diff')).toBeVisible()
+  await expect(page.locator('.diff__line--add').first()).toBeVisible()
+  await expect(page.getByText(/const trimmed = name\.trim\(\)/)).toBeVisible()
+})
+
 test('offers a text fallback when the browser has no speech engine', async ({ browser }) => {
   const context = await browser.newContext()
   await context.addInitScript(() => {

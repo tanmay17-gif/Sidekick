@@ -5,7 +5,7 @@ import { Speaker } from '@/lib/voice/synthesis'
 import { useSidekick, type Phase } from '@/state/useSidekick'
 import { CapabilityBar } from './components/CapabilityBar'
 import { Composer } from './components/Composer'
-import { Conversation } from './components/Conversation'
+import { Conversation, LiveProgress } from './components/Conversation'
 import { GamesPanel } from './components/GamesPanel'
 import { MovieCompanion } from './components/MovieCompanion'
 import { MusicPanel } from './components/MusicPanel'
@@ -266,6 +266,12 @@ function TalkSurface({
           }}
         />
       )}
+
+      {busy && sidekick.liveEvents.length > 0 ? (
+        <div style={{ marginTop: 'var(--space-4)' }}>
+          <LiveProgress events={sidekick.liveEvents} />
+        </div>
+      ) : null}
 
       {busy ? (
         <p className="hint" role="status" style={{ marginTop: 'var(--space-4)' }}>

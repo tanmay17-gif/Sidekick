@@ -297,6 +297,25 @@ export function ProgressLog({ events }: { events: ProgressEvent[] }) {
   )
 }
 
+/**
+ * Live progress, shown while a request is still in flight. The events come
+ * from the backend stream - nothing here is generated on a timer.
+ */
+export function LiveProgress({ events }: { events: ProgressEvent[] }) {
+  if (events.length === 0) return null
+  return (
+    <div className="bubble bubble--assistant" aria-live="polite">
+      <div className="row" style={{ gap: 'var(--space-2)', marginBottom: 'var(--space-2)' }}>
+        <StatusDot tone="executing" />
+        <span className="turn__who" style={{ margin: 0 }}>
+          Live progress
+        </span>
+      </div>
+      <ProgressLog events={events} />
+    </div>
+  )
+}
+
 function describeEvent(event: ProgressEvent): string {
   if (event.kind === 'diff') return 'patch updated'
   if (event.kind === 'error') return 'error reported'
