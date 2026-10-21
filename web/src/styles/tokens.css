@@ -1,0 +1,122 @@
+/* ------------------------------------------------------------------
+   Sidekick design tokens
+   One restrained system: near-black canvas, a single cool accent,
+   semantic status hues reserved for state only.
+   ------------------------------------------------------------------ */
+
+:root {
+  color-scheme: dark;
+
+  /* Canvas + surfaces ------------------------------------------- */
+  --canvas: #0a0c0f;
+  --surface-1: #101419;
+  --surface-2: #161b22;
+  --surface-3: #1d232c;
+  --surface-raised: #212832;
+
+  /* Lines ------------------------------------------------------- */
+  --line-subtle: #1c222b;
+  --line: #262d38;
+  --line-strong: #333c4a;
+
+  /* Ink --------------------------------------------------------- */
+  --ink: #e9edf3;
+  --ink-secondary: #a7b1c0;
+  --ink-muted: #6f7a8a;
+  --ink-faint: #4b5462;
+
+  /* Accent (single hue, used for focus + primary action) -------- */
+  --accent: #63d2c4;
+  --accent-strong: #8ae6da;
+  --accent-dim: #2c6f68;
+  --accent-ink: #04211f;
+  --accent-wash: rgba(99, 210, 196, 0.12);
+  --accent-wash-strong: rgba(99, 210, 196, 0.2);
+
+  /* Semantic state ---------------------------------------------- */
+  --state-idle: #7d8794;
+  --state-listening: #63d2c4;
+  --state-thinking: #7fa8e0;
+  --state-executing: #d8b46a;
+  --state-confirm: #e0a15f;
+  --state-success: #6bc48a;
+  --state-danger: #e4756c;
+  --state-disconnected: #6f7a8a;
+
+  --success-wash: rgba(107, 196, 138, 0.12);
+  --danger-wash: rgba(228, 117, 108, 0.12);
+  --warn-wash: rgba(224, 161, 95, 0.12);
+  --info-wash: rgba(127, 168, 224, 0.12);
+
+  /* Type -------------------------------------------------------- */
+  --font-sans: 'Inter var', 'Inter', ui-sans-serif, system-ui, -apple-system, 'Segoe UI',
+    Roboto, 'Helvetica Neue', Arial, sans-serif;
+  --font-mono: ui-monospace, 'SF Mono', 'Cascadia Mono', 'Roboto Mono', Menlo, Consolas,
+    'Liberation Mono', monospace;
+
+  --text-2xs: 0.6875rem; /* 11px - labels */
+  --text-xs: 0.75rem; /* 12px - meta */
+  --text-sm: 0.8125rem; /* 13px - secondary body */
+  --text-md: 0.9375rem; /* 15px - body */
+  --text-lg: 1.0625rem; /* 17px - lead */
+  --text-xl: 1.375rem; /* 22px - section title */
+  --text-2xl: 1.75rem; /* 28px - page title */
+  --text-3xl: 2.25rem; /* 36px - display */
+
+  --leading-tight: 1.2;
+  --leading-snug: 1.35;
+  --leading-normal: 1.55;
+
+  --tracking-tight: -0.014em;
+  --tracking-normal: 0;
+  --tracking-wide: 0.06em;
+  --tracking-wider: 0.12em;
+
+  /* Space (4px base) -------------------------------------------- */
+  --space-0: 0;
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-5: 1.25rem;
+  --space-6: 1.5rem;
+  --space-7: 1.75rem;
+  --space-8: 2rem;
+  --space-10: 2.5rem;
+  --space-12: 3rem;
+  --space-16: 4rem;
+
+  /* Radii ------------------------------------------------------- */
+  --radius-xs: 4px;
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --radius-xl: 20px;
+  --radius-pill: 999px;
+
+  /* Elevation (restrained) -------------------------------------- */
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow-md: 0 6px 20px -8px rgba(0, 0, 0, 0.65);
+  --shadow-lg: 0 18px 48px -18px rgba(0, 0, 0, 0.8);
+  --ring: 0 0 0 2px var(--canvas), 0 0 0 4px var(--accent-dim);
+
+  /* Motion ------------------------------------------------------ */
+  --ease-out: cubic-bezier(0.22, 0.61, 0.36, 1);
+  --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+  --duration-fast: 120ms;
+  --duration-base: 200ms;
+  --duration-slow: 320ms;
+
+  /* Layout ------------------------------------------------------ */
+  --rail-width: 248px;
+  --dock-max: 880px;
+  --content-max: 1180px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --duration-fast: 0ms;
+    --duration-base: 0ms;
+    --duration-slow: 0ms;
+  }
+}
