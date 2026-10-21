@@ -171,7 +171,8 @@ export function useSidekick(options: UseSidekickOptions = {}) {
         }
         setTurns((existing) => [...existing, assistantTurn])
         setPhase(
-          response.status === 'awaiting_confirmation'
+          response.status === 'awaiting_confirmation' ||
+            response.status === 'needs_clarification'
             ? 'awaiting_confirmation'
             : response.status === 'failed'
               ? 'error'

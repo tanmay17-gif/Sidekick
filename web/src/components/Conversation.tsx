@@ -25,8 +25,22 @@ const STATE_LABEL: Record<ActionState, string> = {
   superseded: 'superseded',
 }
 
+/** Turn level states, added to the contract alongside the action lifecycle. */
+const RESPONSE_LABEL: Record<string, { label: string; tone: Parameters<typeof Dot>[0]['tone'] }> = {
+  needs_clarification: { label: 'needs clarification', tone: 'confirm' },
+  awaiting_transcript: { label: 'awaiting transcript', tone: 'thinking' },
+}
+
 export function StatusDot({ tone }: { tone: Parameters<typeof Dot>[0]['tone'] }) {
   return <Dot tone={tone} />
+}
+
+function toneForAction(state: string): Parameters<typeof Dot>[0]['tone'] {
+  return (STATE_TONE as Record<string, Parameters<typeof Dot>[0]['tone']>)[state] ?? 'muted'
+}
+
+function labelForAction(state: string): string {
+  return (STATE_LABEL as Record<string, string>)[state] ?? state
 }
 
 export interface ConversationProps {
@@ -128,14 +142,16 @@ function AssistantTurn({
     )
   }
 
+  const responseStatus = RESPONSE_LABEL[response.status]
+  const statusTone = responseStatus?.tone ?? toneForAction(response.status)
+  const statusLabel = responseStatus?.label ?? labelForAction(response.status)
+
   return (
     <article className="turn">
       <div className="turn__who">
-        <StatusDot tone={STATE_TONE[response.status] ?? 'muted'} />
+        <StatusDot tone={statusTone} />
         Sidekick
-        <span style={{ textTransform: 'none', letterSpacing: 0 }}>
-          · {STATE_LABEL[response.status] ?? response.status}
-        </span>
+        <span style={{ textTransform: 'none', letterSpacing: 0 }}>· {statusLabel}</span>
       </div>
 
       {response.clarification ? (
@@ -187,6 +203,11 @@ function AssistantTurn({
             provider <b>{response.decision_model.provider}</b>
           </span>
         ) : null}
+        {response.decision_model.source ? (
+          <span>
+            source <b>{response.decision_model.source}</b>
+          </span>
+        ) : null}
       </div>
     </article>
   )
@@ -198,8 +219,14 @@ function ActionCard({ action, index }: { action: Action; index: number }) {
       <span className="plan__index">{index + 1}</span>
       <div className="plan__main">
         <div className="plan__tool">{action.tool}</div>
+        {action.description ? <div className="plan__desc">{action.description}</div> : null}
         {Object.keys(action.arguments).length > 0 ? (
           <div className="plan__args">{formatArgs(action.arguments)}</div>
+        ) : null}
+        {typeof action.progress === 'number' && action.progress > 0 ? (
+          <div className="plan__progress" aria-hidden="true">
+            <span style={{ width: `${Math.round(action.progress * 100)}%` }} />
+          </div>
         ) : null}
         {action.error ? (
           <div className="plan__args" style={{ color: 'var(--state-danger)' }}>
@@ -285,14 +312,17 @@ export function ProgressLog({ events }: { events: ProgressEvent[] }) {
   if (events.length === 0) return null
   return (
     <div className="progress" role="log" aria-label="Progress events">
-      {events.map((event, index) => (
-        <div className="progress__row" key={`${event.seq ?? index}`}>
-          <span className="progress__time">
-            {event.at ? new Date(event.at).toLocaleTimeString() : `#${event.seq ?? index + 1}`}
-          </span>
-          <span className="progress__label">{event.message ?? describeEvent(event)}</span>
-        </div>
-      ))}
+      {events.map((event, index) => {
+        const stamp = event.ts ?? event.at
+        return (
+          <div className="progress__row" key={`${event.seq ?? index}`}>
+            <span className="progress__time">
+              {stamp ? new Date(stamp).toLocaleTimeString() : `#${event.seq ?? index + 1}`}
+            </span>
+            <span className="progress__label">{event.message ?? describeEvent(event)}</span>
+          </div>
+        )
+      })}
     </div>
   )
 }

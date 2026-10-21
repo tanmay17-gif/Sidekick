@@ -941,6 +941,28 @@
   word-break: break-word;
 }
 
+.plan__desc {
+  margin-top: 2px;
+  font-size: var(--text-xs);
+  color: var(--ink-secondary);
+}
+
+.plan__progress {
+  margin-top: var(--space-2);
+  height: 3px;
+  border-radius: var(--radius-pill);
+  background: var(--surface-3);
+  overflow: hidden;
+}
+
+.plan__progress span {
+  display: block;
+  height: 100%;
+  background: var(--state-executing);
+  border-radius: var(--radius-pill);
+  transition: width var(--duration-base) var(--ease-out);
+}
+
 .plan__state {
   flex: none;
   align-self: flex-start;

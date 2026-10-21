@@ -24,11 +24,19 @@ export type ActionState =
   | 'cancelled'
   | 'superseded'
 
+/**
+ * Turn level states. The action lifecycle states above apply to a single
+ * action; these two describe the turn as a whole.
+ */
+export type ResponseStatus = ActionState | 'needs_clarification' | 'awaiting_transcript'
+
 export interface ContractError {
   code: string
   message: string
   retryable: boolean
   timeout: boolean
+  /** Optional structured context, added in the ratified contract. */
+  details?: unknown
 }
 
 export interface CorrectionContext {
@@ -66,6 +74,8 @@ export interface DecisionModel {
   provider: string
   model: string
   fallback_used: boolean
+  /** Where the interpretation came from (for example `rules` or a model id). */
+  source?: string
 }
 
 export interface ActionTimestamps {
@@ -80,6 +90,12 @@ export interface Action {
   approval_required: boolean
   state: ActionState
   superseded_by: string | null
+  /** Human readable description of the action. */
+  description?: string
+  /** The execution job that carries this action, when there is one. */
+  job_id?: string
+  /** Progress between 0 and 1, when the backend reports it. */
+  progress?: number
   result?: unknown
   error?: ContractError
   timestamps: ActionTimestamps
@@ -101,15 +117,24 @@ export type ProgressEventKind =
 export interface ProgressEvent {
   /** Monotonic sequence number assigned by the backend. */
   seq?: number
+  /** Coarse category the UI switches on. */
   kind?: ProgressEventKind
+  /** The execution service's own category. */
+  type?: string
   /** Human readable status line. */
   message?: string
   /** Tool / action this event belongs to. */
   action_id?: string
   tool?: string
+  /** The execution job that carries the action, when there is one. */
+  job_id?: string
+  /** The action state at the time of the event. */
+  status?: string
   /** Structured payload (e.g. a diff for a coding job). */
   data?: unknown
   /** ISO timestamp when the event was produced. */
+  ts?: string
+  /** ISO timestamp when the event was produced (client-side alias). */
   at?: string
 }
 
@@ -120,7 +145,7 @@ export interface SidekickResponse {
   action_plan: Action[]
   risk_level: RiskLevel
   decision_model: DecisionModel
-  status: ActionState
+  status: ResponseStatus
   clarification: Clarification | null
   events: ProgressEvent[]
   /** Optional spoken/summary text produced by the backend. */

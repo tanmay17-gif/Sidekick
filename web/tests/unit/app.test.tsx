@@ -175,6 +175,70 @@ describe('Sidekick app integration', () => {
     release?.()
   })
 
+  it('handles the ratified turn-level status and the event timestamp field', async () => {
+    const user = userEvent.setup()
+    installFetch((url) =>
+      url.includes('/capabilities')
+        ? new Response(JSON.stringify(capabilities), {
+            headers: { 'content-type': 'application/json' },
+          })
+        : new Response(
+            JSON.stringify(
+              response({
+                status: 'needs_clarification',
+                decision_model: {
+                  provider: 'sidekick',
+                  model: 'rule-engine-v1',
+                  fallback_used: true,
+                  source: 'rules',
+                },
+                events: [
+                  {
+                    seq: 1,
+                    kind: 'progress',
+                    message: 'interpreted with the rule engine',
+                    ts: '2026-01-01T10:00:00Z',
+                  },
+                ],
+                action_plan: [
+                  {
+                    action_id: 'a-1',
+                    tool: 'note.write',
+                    arguments: {},
+                    approval_required: false,
+                    state: 'pending',
+                    superseded_by: null,
+                    description: 'Write the note to the workspace',
+                    progress: 0.4,
+                    timestamps: { created: '2026-01-01T00:00:00Z', updated: '2026-01-01T00:00:01Z' },
+                  },
+                ],
+              }),
+            ),
+            { headers: { 'content-type': 'application/json' } },
+          ),
+    )
+
+    const { container } = render(<App />)
+    await waitFor(() => expect(screen.getByText('music.play')).toBeInTheDocument())
+
+    await user.type(screen.getByLabelText('Your request'), 'take a note')
+    await user.click(screen.getByRole('button', { name: 'Send' }))
+
+    await waitFor(() => {
+      expect(screen.getByText(/needs clarification/)).toBeInTheDocument()
+    })
+    // The fallback and the source are both surfaced, never hidden.
+    const metaText = container.querySelector('.bubble__meta')?.textContent ?? ''
+    expect(metaText).toContain('rule-engine-v1')
+    expect(metaText).toContain('(fallback)')
+    expect(metaText).toContain('rules')
+    // The action description and progress come from the backend.
+    expect(screen.getByText('Write the note to the workspace')).toBeInTheDocument()
+    // The event timestamp is read from the ratified `ts` field.
+    expect(screen.getByText('interpreted with the rule engine')).toBeInTheDocument()
+  })
+
   it('renders a clarification with selectable options', async () => {
     const user = userEvent.setup()
     installFetch((url) =>
