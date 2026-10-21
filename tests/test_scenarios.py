@@ -152,3 +152,47 @@ def test_a_confirmation_binds_to_the_action_that_is_still_pending(
     other = state.get_action(first_id)
     assert other is not None
     assert other.state is ActionStatus.AWAITING_CONFIRMATION
+
+
+# --------------------------------------------------------------------------
+# The spoken line
+# --------------------------------------------------------------------------
+
+
+def test_the_spoken_line_says_what_is_going_to_happen(engine: DecisionEngine) -> None:
+    response = ask(engine, "Open Spotify")
+
+    assert response.speech == "Opening Spotify."
+
+
+def test_the_spoken_line_of_a_correction_says_instead(engine: DecisionEngine) -> None:
+    response = ask(engine, "Open YouTube, no wait, open Spotify")
+
+    assert response.speech == "Opening Spotify instead."
+
+
+def test_the_spoken_line_speaks_the_duration_in_words(engine: DecisionEngine) -> None:
+    assert ask(engine, "Set a timer for 5 minutes").speech == "Setting a timer for 5 minutes."
+    assert ask(engine, "Set a timer for 90 seconds").speech == "Setting a timer for 1 minute 30 seconds."
+
+
+def test_the_spoken_line_asks_for_the_missing_piece(engine: DecisionEngine) -> None:
+    response = ask(engine, "echo")
+
+    assert response.speech is not None
+    assert response.speech == response.clarification.question
+
+
+def test_the_spoken_line_asks_for_a_confirmation(engine: DecisionEngine) -> None:
+    response = ask(engine, "Delete everything")
+
+    assert response.speech is not None
+    assert "confirm" in response.speech.lower()
+
+
+def test_the_spoken_line_never_claims_more_than_happened(engine: DecisionEngine) -> None:
+    """A failed action is not announced as done."""
+    response = ask(engine, "explode")
+
+    assert response.status is ResponseStatus.FAILED
+    assert response.speech is None or "explode" not in response.speech.lower()
