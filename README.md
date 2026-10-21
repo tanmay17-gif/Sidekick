@@ -64,14 +64,24 @@ Agent 3 owns the real experience).
 Run the tests:
 
 ```bash
-python -m pytest            # 136 passed, 6 skipped - no network, no model weights
+python -m pytest            # 189 passed, 7 skipped - no network, no model weights
 ```
 
-The six skipped tests are the real-model integration tests. They need the
-checkpoint (~800 MB, downloaded on first use):
+The seven skipped tests are opt-in: the real-model integration tests (they need
+the ~800 MB checkpoint) and the wheel build.
 
 ```bash
 SIDEKICK_RUN_MODEL_TESTS=1 python -m pytest tests/test_laya_integration.py
+SIDEKICK_PACKAGING_BUILD=1   python -m pytest tests/test_packaging.py
+```
+
+Verify the running backend over real HTTP (it starts a real uvicorn server and
+uses the real model):
+
+```bash
+python scripts/verify_backend.py            # 20 checks
+python scripts/check_contract_compat.py     # against the other agents' branches
+python scripts/check_packaging.py --build   # builds a wheel and looks inside it
 ```
 
 Reproduce what the product actually does with realistic requests:
