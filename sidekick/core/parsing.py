@@ -56,6 +56,10 @@ _SPLIT_RE = re.compile(
     r"|\s+followed\s+by\s+"
     r"|\s+plus\s+"
     r"|\s*,\s+and\s+"
+    # A full stop followed by a space is a sentence boundary. A full stop in
+    # the middle of a number ("5.5 minutes") is not, because it is not
+    # followed by whitespace.
+    r"|\.\s+"
 )
 
 _MIN_SEGMENT_CHARS = 3
@@ -159,6 +163,11 @@ class CorrectionSignal:
     ``preceding`` holds the instruction that is being corrected and
     ``residue`` holds the *new* instruction. Splitting the two is what makes
     "open YouTube - no wait, open Spotify" resolve to Spotify only.
+
+    ``is_trailing`` marks the case where the marker ends the sentence
+    ("echo hello instead"): the new instruction is what came *before* the
+    marker and the correction refers to the previous request, not to another
+    part of this turn.
     """
 
     is_correction: bool
@@ -166,6 +175,7 @@ class CorrectionSignal:
     marker: str | None = None
     preceding: str = ""
     residue: str = ""
+    is_trailing: bool = False
 
     @property
     def removes_previous(self) -> bool:
@@ -173,7 +183,13 @@ class CorrectionSignal:
 
 
 def detect_correction(text: str) -> CorrectionSignal:
-    """Detect a correction signal and split the text around the marker."""
+    """Detect a correction signal and split the text around the marker.
+
+    The marker is usually in the middle ("open YouTube, no wait, open
+    Spotify"): the part before it is superseded, the part after it is the new
+    instruction. A trailing marker ("echo hello instead") is handled too: the
+    instruction is what comes before it.
+    """
     lowered = text.lower()
     for marker in _CORRECTION_MARKERS:
         idx = lowered.find(marker)
@@ -181,12 +197,18 @@ def detect_correction(text: str) -> CorrectionSignal:
             continue
         preceding = text[:idx].strip(" ,;:-.")
         residue = text[idx + len(marker) :].strip(" ,;:-")
+        trailing = False
+        if not residue and preceding:
+            # A trailing marker: the instruction is the part before it.
+            residue, preceding = preceding, ""
+            trailing = True
         return CorrectionSignal(
             is_correction=True,
             is_replacement=marker in _REPLACEMENT_MARKERS,
             marker=marker,
             preceding=preceding,
             residue=residue,
+            is_trailing=trailing,
         )
     return CorrectionSignal(is_correction=False, preceding="", residue=text.strip())
 
