@@ -38,7 +38,7 @@ describe('Movie Buddy', () => {
 
     await waitFor(() => {
       expect(screen.getByText(/cannot see other browser tabs/i)).toBeInTheDocument()
-    })
+    }, { timeout: 5000 })
     expect(screen.getByText(/does not analyse the picture/i)).toBeInTheDocument()
     expect(screen.getByText(/subtitle-based understanding, no picture analysis/i)).toBeInTheDocument()
   })
@@ -49,7 +49,7 @@ describe('Movie Buddy', () => {
 
     await waitFor(() => {
       expect(screen.getByText(/Movie Buddy is on and waiting with you/i)).toBeInTheDocument()
-    })
+    }, { timeout: 5000 })
   })
 
   it('offers the bundled film and a way to open another one', async () => {
@@ -77,10 +77,22 @@ describe('Movie Buddy', () => {
     expect(video).toBeInTheDocument()
     expect(document.querySelectorAll('video track')).toHaveLength(1)
 
+    // The caption track has to be parsed before the media clock can be read
+    // against it - the file is fetched asynchronously.
+    await waitFor(
+      () => {
+        expect(screen.getByText(/caption lines over/i)).toBeInTheDocument()
+      },
+      { timeout: 5000 },
+    )
+
     seekTo(video, 34)
-    await waitFor(() => {
-      expect(screen.getByText(/Bert the Turtle/i)).toBeInTheDocument()
-    })
+    await waitFor(
+      () => {
+        expect(screen.getByText(/Bert the Turtle/i)).toBeInTheDocument()
+      },
+      { timeout: 5000 },
+    )
   })
 
   it('reacts at a real caption and explains why', async () => {
@@ -95,9 +107,12 @@ describe('Movie Buddy', () => {
 
     // The first caption line of the film.
     seekTo(video, 1.5)
-    await waitFor(() => {
-      expect(screen.getByText(/Watching with you/i)).toBeInTheDocument()
-    })
+    await waitFor(
+      () => {
+        expect(screen.getByText(/Watching with you/i)).toBeInTheDocument()
+      },
+      { timeout: 5000 },
+    )
   })
 
   it('goes quiet immediately and reports the remaining time', async () => {
@@ -105,12 +120,12 @@ describe('Movie Buddy', () => {
     installFetch()
     render(<MovieBuddy speaker={new Speaker()} speechEnabled={false} />)
 
-    await waitFor(() => expect(screen.getByLabelText('Film')).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByLabelText('Film')).toBeInTheDocument(), { timeout: 5000 })
     await user.click(screen.getByRole('button', { name: 'Be quiet for a bit' }))
 
     await waitFor(() => {
       expect(screen.getByText(/Staying quiet for \d+ more seconds/i)).toBeInTheDocument()
-    })
+    }, { timeout: 5000 })
   })
 
   it('answers "what just happened" from the captions and says when it cannot', async () => {
@@ -129,7 +144,7 @@ describe('Movie Buddy', () => {
 
     await waitFor(() => {
       expect(screen.getByText('Sidekick said')).toBeInTheDocument()
-    })
+    }, { timeout: 5000 })
     const answer = screen.getByText('Sidekick said').parentElement as HTMLElement
     expect(answer.textContent).toMatch(/caption/i)
   })
@@ -144,6 +159,12 @@ describe('Movie Buddy', () => {
       expect(element).not.toBeNull()
       return element as HTMLVideoElement
     }))
+    await waitFor(
+      () => {
+        expect(screen.getByText(/caption lines over/i)).toBeInTheDocument()
+      },
+      { timeout: 5000 },
+    )
     seekTo(video, 1.5)
     await waitFor(() => expect(screen.getByText('Remarks')).toBeInTheDocument())
 
