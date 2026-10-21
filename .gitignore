@@ -3,6 +3,7 @@ __pycache__/
 *.egg-info/
 build/
 dist/
+.eggs/
 .venv/
 venv/
 .env
@@ -16,3 +17,14 @@ htmlcov/
 .sidekick_runtime/
 sidekick_runtime/
 *.log
+
+# Editor / OS noise
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# NOTE (Agent 2): the execution service writes its job store outside the
+# repository by default. If a local job store is created inside the tree it
+# is ignored here.
+.sidekick-jobs.json

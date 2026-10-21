@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "sidekick"
 version = "0.1.0"
-description = "Sidekick - voice-first intelligent companion: core brain, intent resolution, safety policy and session orchestration."
+description = "Sidekick - voice-first intelligent companion: core brain, intent resolution, safety policy, session orchestration and real execution."
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "Apache-2.0" }
@@ -23,9 +23,10 @@ dev = ["pytest>=8.0", "httpx>=0.27"]
 
 [project.scripts]
 sidekick = "sidekick.api.app:main"
+sidekick-execution = "sidekick_execution.__main__:main"
 
 [tool.setuptools.packages.find]
-include = ["sidekick*"]
+include = ["sidekick*", "sidekick_execution*"]
 
 [tool.setuptools.package-data]
 sidekick = ["api/static/*"]
@@ -34,3 +35,7 @@ sidekick = ["api/static/*"]
 testpaths = ["tests"]
 addopts = "-q"
 filterwarnings = ["ignore::DeprecationWarning"]
+
+# NOTE (Agent 2): the execution service (sidekick_execution) is implemented on
+# the standard library only and therefore adds no runtime dependency. The
+# dependency list above stays exactly as Agent 1 defined it.
