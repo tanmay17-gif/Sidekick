@@ -1,10 +1,23 @@
-# Dependencies and build output
+# --- Python (Core / Execution) ---------------------------------------
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+.venv/
+venv/
+.pytest_cache/
+.coverage
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+.sidekick_runtime/
+sidekick_runtime/
+
+# --- Node (web client) ------------------------------------------------
 node_modules/
 dist/
 dist-ssr/
 *.local
-
-# Test output
 coverage/
 playwright-report/
 test-results/
@@ -14,7 +27,7 @@ blob-report/
 # Screenshots captured by scripts/screenshots.mjs (reference material, not source)
 screenshots/
 
-# Editor / OS
+# --- Editor / OS ------------------------------------------------------
 .vscode/*
 !.vscode/extensions.json
 .idea/
@@ -26,15 +39,15 @@ Thumbs.db
 *.sln
 *.sw?
 
-# Environment
+# --- Environment ------------------------------------------------------
 .env
-.env.local
-.env.*.local
+.env.*
+!**/.env.example
 
-# Logs
+# --- Logs -------------------------------------------------------------
+*.log
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
 logs/
-*.log

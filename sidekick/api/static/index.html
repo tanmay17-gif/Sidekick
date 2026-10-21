@@ -1,0 +1,196 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Sidekick - core slice</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg: #0b0d12;
+        --panel: #141821;
+        --line: #232a38;
+        --text: #e8ecf5;
+        --muted: #97a1b6;
+        --accent: #6ea8fe;
+        --ok: #4ade80;
+        --warn: #fbbf24;
+        --err: #f87171;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font: 15px/1.55 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+        background: var(--bg);
+        color: var(--text);
+        display: grid;
+        place-items: start center;
+        padding: 32px 16px 64px;
+      }
+      main { width: min(880px, 100%); }
+      h1 { font-size: 20px; margin: 0 0 4px; letter-spacing: -0.01em; }
+      p.sub { margin: 0 0 24px; color: var(--muted); font-size: 13px; }
+      form { display: flex; gap: 8px; }
+      input {
+        flex: 1;
+        padding: 11px 13px;
+        border-radius: 9px;
+        border: 1px solid var(--line);
+        background: var(--panel);
+        color: var(--text);
+        font: inherit;
+      }
+      input:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+      button {
+        padding: 11px 16px;
+        border-radius: 9px;
+        border: 1px solid var(--accent);
+        background: var(--accent);
+        color: #06101f;
+        font: inherit;
+        font-weight: 600;
+        cursor: pointer;
+      }
+      button.secondary { background: transparent; color: var(--accent); }
+      .row { display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap; }
+      .chip {
+        padding: 5px 10px;
+        border-radius: 999px;
+        border: 1px solid var(--line);
+        background: var(--panel);
+        color: var(--muted);
+        font-size: 12px;
+        cursor: pointer;
+      }
+      section {
+        margin-top: 24px;
+        padding: 16px;
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        background: var(--panel);
+      }
+      h2 { font-size: 13px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); margin: 0 0 10px; }
+      pre { margin: 0; white-space: pre-wrap; word-break: break-word; font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--text); }
+      .state { font-weight: 600; }
+      .succeeded, .ok { color: var(--ok); }
+      .failed { color: var(--err); }
+      .awaiting_confirmation, .pending { color: var(--warn); }
+      .badge { display: inline-block; padding: 1px 7px; border-radius: 6px; border: 1px solid var(--line); font-size: 11px; color: var(--muted); }
+      .fallback { color: var(--warn); }
+      .model { color: var(--ok); }
+      .muted { color: var(--muted); }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Sidekick &mdash; core slice</h1>
+      <p class="sub">
+        Placeholder UI for the Phase 1 vertical slice. Agent 3 owns the real voice/UI experience.
+      </p>
+
+      <form id="ask">
+        <input id="utterance" autocomplete="off" placeholder="Open Spotify, no wait, open YouTube" />
+        <button type="submit">Send</button>
+      </form>
+      <div class="row" id="examples"></div>
+
+      <section>
+        <h2>Result</h2>
+        <div id="summary" class="muted">No request sent yet.</div>
+        <pre id="detail" style="margin-top: 12px"></pre>
+      </section>
+
+      <section>
+        <h2>Actions</h2>
+        <div id="actions" class="muted">&mdash;</div>
+      </section>
+
+      <section>
+        <h2>Model</h2>
+        <div id="model" class="muted">&mdash;</div>
+      </section>
+    </main>
+
+    <script>
+      const sessionId = "slice-" + Math.random().toString(36).slice(2);
+      const $ = (id) => document.getElementById(id);
+      const examples = [
+        "Open Spotify",
+        "Open YouTube, no wait, open Spotify",
+        "Set a timer for 5 minutes",
+        "Write a note that the groceries are done",
+        "Play some jazz",
+        "What is pending?",
+      ];
+      $("examples").innerHTML = examples
+        .map((e) => `<span class="chip">${e}</span>`)
+        .join("");
+      document.querySelectorAll(".chip").forEach((chip) => {
+        chip.onclick = () => {
+          $("utterance").value = chip.textContent;
+          send();
+        };
+      });
+
+      $("ask").onsubmit = (e) => {
+        e.preventDefault();
+        send();
+      };
+
+      async function send() {
+        const utterance = $("utterance").value.trim();
+        if (!utterance) return;
+        $("summary").textContent = "Working...";
+        const res = await fetch("/v1/decide", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "X-Sidekick-Session": sessionId,
+          },
+          body: JSON.stringify({
+            request_id: "req-" + Date.now() + "-" + Math.random().toString(36).slice(2),
+            session_id: sessionId,
+            utterance,
+            input_source: "text",
+            utterance_finalized: true,
+          }),
+        });
+        const data = await res.json();
+        render(data);
+      }
+
+      function render(data) {
+        const dm = data.decision_model || {};
+        $("summary").innerHTML =
+          `<span class="state ${data.status}">${data.status}</span> &middot; ` +
+          `${escapeHtml(data.message || "")}`;
+        $("detail").textContent = JSON.stringify(data, null, 2);
+        const plan = data.action_plan || [];
+        $("actions").innerHTML = plan.length
+          ? plan
+              .map(
+                (a) =>
+                  `<div>&bull; <b>${escapeHtml(a.tool)}</b> &mdash; ` +
+                  `<span class="state ${a.state}">${a.state}</span> ` +
+                  `<span class="badge">${escapeHtml(JSON.stringify(a.arguments))}</span>` +
+                  (a.error ? ` <span class="failed">${escapeHtml(a.error.message)}</span>` : "") +
+                  `</div>`
+              )
+              .join("")
+          : "No actions planned.";
+        $("model").innerHTML =
+          `provider <b>${escapeHtml(dm.provider)}</b> / model <b>${escapeHtml(dm.model)}</b> ` +
+          `&middot; <span class="${dm.fallback_used ? "fallback" : "model"}">` +
+          `${dm.fallback_used ? "fallback active" : "model inference"}</span>` +
+          (dm.fallback_reason ? ` <span class="muted">(${escapeHtml(dm.fallback_reason)})</span>` : "") +
+          ` &middot; ${dm.latency_ms ?? 0} ms`;
+      }
+
+      function escapeHtml(value) {
+        return String(value ?? "").replace(/[&<>"']/g, (c) => ({
+          "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
+        })[c]);
+      }
+    </script>
+  </body>
+</html>
