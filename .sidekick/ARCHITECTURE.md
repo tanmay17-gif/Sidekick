@@ -1,0 +1,63 @@
+# Sidekick Architecture
+
+Module boundaries and design decisions. Owned by Agent 1. Preserve existing conventions; do not duplicate.
+
+## Product mission (non-negotiable)
+
+Sidekick is a voice-first, context-aware action companion. It understands evolving intent, not just a single classified string: "Open YouTube and play a song - no, wait, Spotify" must resolve to the final intended destination before a conflicting action executes. It supports multi-action requests, parameter corrections, clarifying questions, interruption, pause/suspend/resume/switch, session-aware references, pending-action visibility, and safe confirmation for consequential operations. It truthfully reports what happened and what did not.
+
+## Design principles
+
+- Real functionality only. No faked voice input, timer-driven subtitle pop-ups presented as sync, fictional service connections, simulated backend success presented as real, or unverified Alexa+ claims.
+- Model interpretation is separate from deterministic safety policy and tool execution. The model cannot override safety policy.
+- Session state is isolated by explicit session ID/header/context. No global singleton for user task storage. Two concurrent sessions must not see each other's active tasks or pending actions (tested).
+- Action status is driven by actual worker/tool results, never invented frontend timers.
+- High-impact or irreversible actions require explicit approval; a confirmation binds to the exact pending action and expires if the plan changes.
+- Fallback identity is observable: never silently change models or represent a fallback as the intended model. Expose provider/model used, fallback flag, latency, load errors.
+- Keep private chain-of-thought hidden from users; give concise decisions, progress, and actionable clarification questions.
+- Handle missing credentials, permissions, network outages, provider timeouts, and unavailable Alexa+ with honest, recoverable states.
+
+## Module boundaries
+
+### Core (Agent 1)
+
+- **Intent resolution**: parses the complete available utterance + context + correction signals into a structured, validated intent. Structured output schema, validation, deterministic post-processing. Never executes on a partial transcript while ASR is still revising unless streaming policy explicitly allows a safe reversible action.
+- **Action planning**: splits multi-action requests only when segments are independently resolvable; preserves order and dependencies; never silently drops segments, duplicates actions, or executes partial plans after unresolved risky ambiguity.
+- **Session context**: session-scoped storage; active task, suspended tasks, relevant entities; expiry/limits; thread-safe; bounded retention; no cross-session entity leakage.
+- **Corrections**: a later correction supersedes the earlier destination before execution where possible. If the old action already began and cannot be cleanly cancelled, stop/compensate safely and explain state instead of pretending it never happened.
+- **Safety / deterministic policy**: post-interpretation validation of destination, tool, risk, approval, and arguments. Cannot be bypassed by model output.
+- **Tool/action registry contract**: validated capabilities; provider/fallback semantics.
+- **Request/response contract**: see `API_CONTRACTS.md`.
+
+### Execution (Agent 2)
+
+- Real coding-agent execution, safe workspace operations, job lifecycle, real tool/service adapters behind the contract.
+
+### Experience (Agent 3)
+
+- Premium UI, real voice input/output, playable movie companion with subtitle timing tied to actual media playback, music/game experiences where technically available, accessibility. Chess is one example, not the whole game strategy.
+
+### QA / Release (Agent 4)
+
+- Automated checks, end-to-end validation, merge gate, hackathon rule evidence, release/deployment verification.
+
+## Session isolation
+
+- In-memory session-scoped storage is appropriate for a local single-process prototype; persistence/restart limits are documented.
+- Concurrency: two session IDs tested side by side proving no cross-talk.
+
+## Model/provider
+
+- The previous build used `convaiinnovations/laya` with deterministic policy fallback. Treat as a useful lead, not a guaranteed dependency. Verify availability, license, resource needs, and loading behavior before committing to it.
+- Retain the ability to test policy behavior without network/model credentials.
+- Lazy loading/caching must not make the first request hang without progress or timeout handling.
+
+## Status vocabulary
+
+`pending`, `awaiting_confirmation`, `running`, `paused/suspended`, `succeeded`, `failed`, `cancelled`, `superseded`.
+
+## Correction policy
+
+- A correction changes an unexecuted plan before execution.
+- For an in-flight action, the correction cancels/supersedes it where the adapter supports cancellation; otherwise stop/compensate safely and explain.
+- A confirmation must bind to the exact pending action and expire if the plan changes.
