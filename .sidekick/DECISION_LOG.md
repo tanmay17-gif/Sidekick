@@ -20,6 +20,8 @@ Important decisions, alternatives, and reasons. Owned by Agent 1.
 | D12 | 2026-10-21 | `decision_model.fallback_used` is true whenever the interpretation was *not* produced by the configured model (unavailable, timeout, invalid output, low confidence, or a deterministic control) | Reporting only model failures | Otherwise a response could imply the model did the work when it did not |
 | D13 | 2026-10-21 | A running action that the adapter cannot stop becomes `paused` with `error.code = cancellation_unsupported`, never `cancelled` | Reporting it as cancelled | The work may still be running; reporting success would be a lie |
 | D14 | 2026-10-21 | A plain "and" is only a segment separator when both sides resolve to *different* capabilities | Splitting on every "and" | "echo hello and goodbye" is one request; splitting it would drop the second half |
+| D15 | 2026-10-21 | A trailing correction marker ("echo hello instead") supersedes the previous *request*, not the other segments of the same turn; a marker in the middle supersedes both | One rule for every marker position | With one rule, "cancel that and echo hello instead" superseded the cancel before it could run. The two positions mean different things and are now handled separately |
+| D16 | 2026-10-21 | A full stop followed by whitespace is a sentence boundary | Splitting on every full stop | "Start that game. Actually, pause the music first." is two requests; "5.5 minutes" is one |
 
 
 ## Pending decisions
