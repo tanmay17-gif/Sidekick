@@ -105,9 +105,16 @@ followed by one final `data: {SidekickResponse}` frame. Both forms are implement
   "clarification": null | { "question": "<string>", "options": [ ... ], "action_id": "<id>", "missing_arguments": [ ... ] },
   "events": [ ... streaming/progress events ... ],
   "session": { ... session projection ... },
-  "message": "<human readable summary for the UI>"
+  "message": "<human readable summary for the UI>",
+  "speech": "<a short line the client may speak verbatim, or null>"
 }
 ```
+
+`speech` is a short, truthful line about what is about to happen or what is needed from the
+user - never a claim that something finished unless it did. When it is absent the client reads
+the short summary of the real action plan instead. The core renders it from the tool's
+`speech_template` (see the capability catalog) with the action's arguments, so a new capability
+can be given a natural voice without touching the engine.
 
 `decision_model.fallback_used` is `true` **exactly when the interpretation was not produced by the
 configured decision model**. That happens when the model is unavailable, times out, returns unusable
@@ -256,7 +263,9 @@ Transitions:
     }
   ],
   "result_fields": ["path", "bytes"],
-  "destinations": []
+  "destinations": [],
+  "destination_labels": { "youtube": "YouTube" },
+  "speech_template": "Opening {destination}."
 }
 ```
 
@@ -266,6 +275,10 @@ Transitions:
 - `remainder` - the text that follows the tool alias,
 - `auto` - quoted when available, otherwise the remainder,
 - `none` - the value is only ever supplied by the caller.
+
+`speech_template` is the short line the voice interface speaks, e.g. `"Opening {destination}."`.
+The placeholders are filled from the action's arguments; a placeholder without a value is dropped.
+`destination_labels` gives the spoken spelling of a destination (`"youtube"` -> `"YouTube"`).
 
 ### Adapter protocol (Agent 2)
 

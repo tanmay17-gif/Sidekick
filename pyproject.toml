@@ -1,3 +1,10 @@
+# Project wide build configuration.
+#
+# Agent 1 owns this file. Agent 2's execution service and Agent 3's browser
+# client live in the same repository, so this file covers all of them: the
+# Python packages are declared here, the browser client has its own
+# `web/package.json`.
+
 [build-system]
 requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
@@ -5,7 +12,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "sidekick"
 version = "0.1.0"
-description = "Sidekick - voice-first intelligent companion: core brain, intent resolution, safety policy, session orchestration and real execution."
+description = "Sidekick - voice-first intelligent companion: core brain, execution service and browser client."
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "Apache-2.0" }
@@ -35,7 +42,3 @@ sidekick = ["api/static/*"]
 testpaths = ["tests"]
 addopts = "-q"
 filterwarnings = ["ignore::DeprecationWarning"]
-
-# NOTE (Agent 2): the execution service (sidekick_execution) is implemented on
-# the standard library only and therefore adds no runtime dependency. The
-# dependency list above stays exactly as Agent 1 defined it.

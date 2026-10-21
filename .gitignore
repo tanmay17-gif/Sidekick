@@ -1,30 +1,64 @@
+# Python bytecode / build artifacts
 __pycache__/
 *.py[cod]
 *.egg-info/
 build/
 dist/
 .eggs/
+.eggs/
+
+# Test and tool caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Virtual environments
 .venv/
 venv/
+
+# Local secrets -- never commit real values
 .env
 .env.*
 !.env.example
-.pytest_cache/
-.coverage
-htmlcov/
-.mypy_cache/
-.ruff_cache/
-.sidekick_runtime/
-sidekick_runtime/
-*.log
 
 # Editor / OS noise
 .vscode/
 .idea/
 .DS_Store
 Thumbs.db
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
 
-# NOTE (Agent 2): the execution service writes its job store outside the
-# repository by default. If a local job store is created inside the tree it
-# is ignored here.
+# Node (the browser client lives in web/)
+node_modules/
+dist-ssr/
+*.local
+coverage/
+playwright-report/
+test-results/
+blob-report/
+.playwright/
+
+# Screenshots captured by scripts/screenshots.mjs (reference material, not source)
+screenshots/
+
+# Logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+logs/
+*.log
+
+# Local runtime state
+# The execution service writes its job store outside the repository by default.
+# If a local job store is created inside the tree it is ignored here.
 .sidekick-jobs.json
+# The core's local tools (notes, timers) write here.
+sidekick_runtime/
+.sidekick_runtime/

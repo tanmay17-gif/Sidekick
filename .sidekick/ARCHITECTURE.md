@@ -101,6 +101,16 @@ The model only interprets the residue, so the stale destination can never reach 
 against the real model: on "Open YouTube, no wait, open Spotify" the model picked YouTube; on the
 residue alone it picks Spotify, which is the correct answer.
 
+Two positions of the marker mean different things and are handled differently:
+
+| Marker | Meaning | What it supersedes |
+|---|---|---|
+| in the middle ("open YouTube, no wait, open Spotify") | the residue replaces what came before it | the earlier segments of this turn **and** the previous turn's pending actions |
+| at the end ("echo hello instead") | the instruction replaces the previous *request* | the previous turn's pending actions only - this turn's plan stays intact |
+
+That distinction is what makes "cancel that and echo hello instead" do both things: the cancel
+runs, the echo runs, and the stale work from the previous turn is superseded.
+
 ### Argument binding
 
 Arguments come from the segment (catalog enum values, durations, counts, quoted or named text, or the

@@ -86,6 +86,7 @@ class NoteWriteTool(_NoteToolBase):
             ),
         ),
         result_fields=("path", "bytes", "title"),
+        speech_template="Saving your note.",
     )
 
     def execute(self, action: Action, arguments: dict[str, Any], context: ToolContext) -> ToolResult:
@@ -145,6 +146,7 @@ class NoteReadTool(_NoteToolBase):
             ),
         ),
         result_fields=("notes",),
+        speech_template="Reading your notes.",
     )
 
     def execute(self, action: Action, arguments: dict[str, Any], context: ToolContext) -> ToolResult:
@@ -240,6 +242,7 @@ class TimerSetTool:
             ),
         ),
         result_fields=("timer_id", "due_at", "duration_seconds"),
+        speech_template="Setting a timer for {duration_seconds}.",
     )
 
     def __init__(self) -> None:
@@ -335,6 +338,7 @@ class TimerListTool:
         risk=RiskLevel.LOW,
         arguments=(),
         result_fields=("timers",),
+        speech_template="Checking your timers.",
     )
 
     def __init__(self, timer_tool: TimerSetTool) -> None:
@@ -362,6 +366,18 @@ MEDIA_DESTINATIONS: dict[str, str] = {
     "google": "https://www.google.com",
 }
 
+#: How each destination is spelled when it is spoken.
+MEDIA_LABELS: dict[str, str] = {
+    "spotify": "Spotify",
+    "youtube": "YouTube",
+    "netflix": "Netflix",
+    "apple_music": "Apple Music",
+    "twitch": "Twitch",
+    "vlc": "VLC",
+    "wikipedia": "Wikipedia",
+    "google": "Google",
+}
+
 
 class MediaOpenTool:
     """Opens a real URL with the system browser."""
@@ -385,6 +401,7 @@ class MediaOpenTool:
             "wikipedia": ("wikipedia",),
             "google": ("google",),
         },
+        destination_labels=MEDIA_LABELS,
         arguments=(
             ArgumentSpec(
                 name="destination",
@@ -395,6 +412,7 @@ class MediaOpenTool:
             ),
         ),
         result_fields=("destination", "url", "opened"),
+        speech_template="Opening {destination}.",
     )
 
     @staticmethod
