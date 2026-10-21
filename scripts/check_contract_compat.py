@@ -109,6 +109,20 @@ def py_from_dict_keys(source: str, class_name: str) -> set[str]:
     return set(re.findall(r"raw\.get\(\s*[\"']([^\"']+)[\"']", match.group(0)))
 
 
+def model_field_names(model: Any) -> set[str]:
+    """The field names a pydantic model exposes.
+
+    ``model_fields`` does not include *computed* fields, but a computed field
+    is part of the serialised payload just like any other. The core's
+    ``Event.ts`` is one: the browser reads it, so the check must see it.
+    """
+    names = set(model.model_fields)
+    computed = getattr(model, "model_computed_fields", None)
+    if computed:
+        names |= set(computed)
+    return names
+
+
 # --------------------------------------------------------------------------
 # Comparison
 # --------------------------------------------------------------------------
@@ -208,7 +222,7 @@ def check_browser_client(source: str, report: Report) -> None:
     )
 
     event_fields = ts_interface_fields(source, "ProgressEvent")
-    missing = event_fields - set(Event.model_fields)
+    missing = event_fields - model_field_names(Event)
     report.require(
         not missing,
         f"the browser client reads event fields the core does not provide: {sorted(missing)}",
