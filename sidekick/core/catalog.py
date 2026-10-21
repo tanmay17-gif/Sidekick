@@ -95,6 +95,12 @@ class ToolSpec:
     destinations: tuple[str, ...] = ()
     # Destinations are matched against the utterance to resolve a target.
     destination_aliases: dict[str, tuple[str, ...]] = field(default_factory=dict)
+    #: How a destination is spelled when it is spoken, e.g. "youtube" -> "YouTube".
+    destination_labels: dict[str, str] = field(default_factory=dict)
+    #: A short spoken line for the voice interface, e.g. ``"Opening {destination}."``.
+    #: Placeholders are filled from the action's arguments; a placeholder
+    #: without a value is dropped.
+    speech_template: str | None = None
 
     def argument(self, name: str) -> ArgumentSpec | None:
         for spec in self.arguments:
@@ -117,6 +123,8 @@ class ToolSpec:
             "arguments": [a.to_dict() for a in self.arguments],
             "result_fields": list(self.result_fields),
             "destinations": list(self.destinations),
+            "destination_labels": dict(self.destination_labels),
+            "speech_template": self.speech_template,
         }
 
 

@@ -235,6 +235,11 @@ class DecisionEngine:
             events=events,
             session=self._session_view(session),
             message=self._summarise(actions, clarification),
+            speech=self._speech(
+                actions,
+                clarification,
+                corrected=any(segment.is_correction for segment in resolved),
+            ),
         )
 
     # ------------------------------------------------------------------
@@ -1187,6 +1192,7 @@ class DecisionEngine:
             events=events,
             session=self._session_view(session),
             message=message,
+            speech=self._speech([new_action] if new_action is not None else [], None),
         )
 
     # ------------------------------------------------------------------
@@ -1305,6 +1311,75 @@ class DecisionEngine:
         return session.get_action(action_id)
 
     # ------------------------------------------------------------------
+    # Spoken summary
+    # ------------------------------------------------------------------
+
+    def _speech(
+        self,
+        actions: list[Action],
+        clarification: Clarification | None,
+        corrected: bool = False,
+    ) -> str | None:
+        """A short line the client may speak verbatim.
+
+        It describes what is *about to happen* or what is needed from the
+        user. It never claims that something finished unless it did.
+        """
+        if clarification is not None:
+            return clarification.question
+
+        if not actions:
+            return None
+
+        for action in actions:
+            if action.state is ActionStatus.AWAITING_CONFIRMATION:
+                phrase = self._action_phrase(action)
+                if phrase:
+                    return f"Can you confirm: {phrase[0].lower()}{phrase[1:]}"
+                return "Can you confirm that action?"
+
+        for action in actions:
+            if action.state in (
+                ActionStatus.PENDING,
+                ActionStatus.RUNNING,
+                ActionStatus.SUCCEEDED,
+            ):
+                phrase = self._action_phrase(action)
+                if phrase:
+                    if corrected:
+                        return f"{phrase.rstrip('.')} instead."
+                    return phrase
+        return None
+
+    def _action_phrase(self, action: Action) -> str | None:
+        """Render the tool's spoken template with the action's arguments."""
+        spec = self.registry.spec(action.tool)
+        if spec is None or not spec.speech_template:
+            return None
+        values: dict[str, Any] = {}
+        for arg in spec.arguments:
+            if arg.name not in action.arguments:
+                continue
+            value = action.arguments[arg.name]
+            if arg.type == "duration" and isinstance(value, (int, float)):
+                values[arg.name] = _humanize_duration(int(value))
+            else:
+                values[arg.name] = value
+        # A destination is spoken with its brand name when the tool knows one.
+        for key, value in list(values.items()):
+            if isinstance(value, str):
+                label = spec.destination_labels.get(value)
+                if label:
+                    values[key] = label
+        try:
+            rendered = spec.speech_template.format_map(_MissingAsEmpty(values))
+        except (KeyError, IndexError, ValueError):
+            return None
+        rendered = re.sub(r"\s{2,}", " ", rendered).strip()
+        rendered = re.sub(r"\s+([.,!?])", r"\1", rendered)
+        return rendered or None
+
+    # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
 
@@ -1415,6 +1490,31 @@ class DecisionEngine:
 # ----------------------------------------------------------------------
 # Helpers
 # ----------------------------------------------------------------------
+
+
+class _MissingAsEmpty(dict):
+    """A format mapping that leaves unknown placeholders empty."""
+
+    def __missing__(self, key: str) -> str:
+        return ""
+
+
+def _humanize_duration(seconds: int) -> str:
+    """'300' -> '5 minutes'."""
+    if seconds < 60:
+        return f"{seconds} second" if seconds == 1 else f"{seconds} seconds"
+    minutes, rest = divmod(seconds, 60)
+    if minutes < 60 and rest == 0:
+        return f"{minutes} minute" if minutes == 1 else f"{minutes} minutes"
+    hours, minutes = divmod(minutes, 60)
+    parts = []
+    if hours:
+        parts.append(f"{hours} hour" if hours == 1 else f"{hours} hours")
+    if minutes:
+        parts.append(f"{minutes} minute" if minutes == 1 else f"{minutes} minutes")
+    if rest:
+        parts.append(f"{rest} second" if rest == 1 else f"{rest} seconds")
+    return " ".join(parts)
 
 
 def _match_enum(values: tuple[str, ...] | list[str], text: str) -> str | None:
