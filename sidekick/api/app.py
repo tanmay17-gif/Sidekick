@@ -128,24 +128,23 @@ def create_app(engine: DecisionEngine | None = None) -> FastAPI:
         The response carries both vocabularies the team uses: ``capabilities``
         with the UI's ``state`` values and ``tools`` with the execution
         service's ``status`` values. Nothing is upgraded on the UI side, so
-        both are computed from the same source of truth.
+        both are computed from the same source of truth - the engine's
+        inventory.
         """
-        catalog = engine.registry.catalog
-        capability_items: list[dict[str, Any]] = []
+        inventory = engine.capability_inventory()
+        by_id = {item["id"]: item for item in inventory}
+
         tool_items: list[dict[str, Any]] = []
         status_counts: dict[str, int] = {}
-
-        for spec in catalog:
-            available = engine.registry.is_available(spec.name)
-            state = "live" if available else "unavailable"
-            detail = (
-                "backed by a real adapter"
-                if available
-                else "declared in the catalog, no adapter is wired up yet"
-            )
-            capability_items.append({"id": spec.name, "state": state, "detail": detail})
-
-            status = "REAL" if available else "NOT_IMPLEMENTED"
+        for spec in engine.registry.catalog:
+            item = by_id.get(spec.name, {})
+            state = item.get("state", "unavailable")
+            if state == "live":
+                status = "REAL"
+            elif state == "client":
+                status = "NOT_IMPLEMENTED"
+            else:
+                status = "NOT_IMPLEMENTED"
             status_counts[status] = status_counts.get(status, 0) + 1
             tool_items.append(
                 {
@@ -155,15 +154,17 @@ def create_app(engine: DecisionEngine | None = None) -> FastAPI:
                     "approval_required": spec.requires_approval,
                     "risk_level": spec.risk.value,
                     "status": status,
-                    "status_detail": detail,
+                    "status_detail": item.get("detail", ""),
                     "simulated": False,
+                    "execution_target": spec.execution_target,
+                    "owner": spec.owner,
                 }
             )
 
         return {
             "contract_version": CONTRACT_VERSION,
             "mode": "live",
-            "capabilities": capability_items,
+            "capabilities": inventory,
             "tools": tool_items,
             "tool_count": len(tool_items),
             "status_counts": status_counts,
@@ -262,6 +263,42 @@ def create_app(engine: DecisionEngine | None = None) -> FastAPI:
                 if event.action_id == action.action_id
             ],
         }
+
+    @app.post("/api/v1/actions/{action_id}/complete")
+    @app.post("/v1/actions/{action_id}/complete")
+    async def complete_action(
+        action_id: str,
+        session_id: str = Body(..., embed=True),
+        status: str = Body(..., embed=True),
+        result: dict | None = Body(default=None, embed=True),
+        error: dict | None = Body(default=None, embed=True),
+    ) -> dict[str, Any]:
+        """Report the outcome of a capability the *client* executed.
+
+        The core plans the capabilities that belong to the browser (media,
+        movies, games). The client runs them and reports the real outcome
+        here. Without this call the action stays ``pending`` - the core never
+        claims the client did something.
+        """
+        from ..core.schemas import ActionError
+
+        parsed_error = None
+        if error:
+            parsed_error = ActionError(
+                code=str(error.get("code", "client_error")),
+                message=str(error.get("message", "the client reported a failure")),
+                retryable=bool(error.get("retryable", False)),
+                timeout=bool(error.get("timeout", False)),
+                details=error.get("details") or {},
+            )
+        action = engine.complete_action(
+            session_id,
+            action_id,
+            status=status,
+            result=result,
+            error=parsed_error,
+        )
+        return {"action": action.model_dump(mode="json")}
 
     @app.get("/api/v1/actions/{action_id}/events")
     @app.get("/v1/actions/{action_id}/events")

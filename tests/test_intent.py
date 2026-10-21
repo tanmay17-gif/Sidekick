@@ -132,5 +132,6 @@ def test_utterance_is_normalized_in_the_intent(engine: DecisionEngine) -> None:
     response = ask(engine, "Please, echo   HELLO!")
 
     assert response.intent.normalized == "echo hello"
-    # The captured value keeps the user's own wording.
-    assert response.action_plan[0].arguments == {"text": "HELLO!"}
+    # The captured value keeps the user's own wording, without the trailing
+    # punctuation that belongs to the sentence, not to the value.
+    assert response.action_plan[0].arguments == {"text": "HELLO"}

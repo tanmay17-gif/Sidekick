@@ -25,6 +25,7 @@ Order of operations (this order *is* the product behaviour):
 from __future__ import annotations
 
 import re
+import threading
 import time
 from dataclasses import dataclass, field
 from typing import Any
@@ -35,9 +36,12 @@ from .catalog import (
     ARG_INTEGER,
     ARG_STRING,
     CAPTURE_AUTO,
+    CAPTURE_EXCEPT_WHEN,
     CAPTURE_NONE,
     CAPTURE_QUOTED,
+    CAPTURE_WHEN,
     ToolSpec,
+    contains_phrase,
 )
 from .decision import (
     Decision,
@@ -59,6 +63,8 @@ from .parsing import (
     detect_correction,
     extract_argument_hints,
     extract_remainder,
+    find_when_expression,
+    is_capability_question,
     is_resume_request,
     match_control,
     normalize,
@@ -90,9 +96,12 @@ from .sessions import SessionState, SessionStore, TaskState, TurnRecord
 # different capabilities (see DecisionEngine._segment).
 _AND_SPLIT_RE = re.compile(r"\s+and\s+")
 
-# A destination proposed by the model is only used when the model was at
-# least this sure about it.
-DESTINATION_CONFIDENCE_FLOOR = 0.7
+#: How long a capability the browser client runs may stay ``pending`` before
+#: the core gives up on it and reports the failure.
+CLIENT_ACTION_TIMEOUT_SECONDS = 120.0
+
+#: How often the background sweep looks for expired client actions.
+CLIENT_SWEEP_INTERVAL_SECONDS = 15.0
 
 
 @dataclass
@@ -134,6 +143,9 @@ class DecisionEngine:
         #: ``True`` when the primary model *is* the deterministic fallback
         #: (for example because the real model is not installed).
         self._primary_is_fallback = primary_is_fallback
+        self._sweeper: threading.Thread | None = None
+        self._sweeper_lock = threading.Lock()
+        self._stop_sweeper = threading.Event()
 
     # ------------------------------------------------------------------
     # Public entry point
@@ -276,6 +288,31 @@ class DecisionEngine:
     def _resolve(self, segment: Segment, session: SessionState, request: SidekickRequest) -> ResolvedSegment:
         """Interpret one segment, falling back to the rule model on failure."""
         correction = detect_correction(segment.text)
+
+        # "What can you actually do?" is a question about the product, not a
+        # task. It is answered from the catalog, so it never reaches a model
+        # and it is never mistaken for a correction (the word "actually" is
+        # a correction marker).
+        if is_capability_question(segment.text):
+            decision = Decision(
+                tool="control.capabilities",
+                confidence=1.0,
+                source=DecisionSource.RULE,
+                details={"capability_question": True},
+            )
+            info = DecisionModelInfo(
+                provider="sidekick",
+                model="capability-catalog",
+                source=DecisionSource.RULE,
+                fallback_used=False,
+                fallback_reason=None,
+                latency_ms=0.0,
+                model_available=getattr(self.primary_model, "available", True),
+            )
+            return self._finish_segment(
+                segment, session, request, decision, info, correction, segment.text
+            )
+
         if correction.is_correction and not correction.residue:
             if bare_marker_is_control(segment.text):
                 # "never mind" and friends mean "drop the pending work".
@@ -316,9 +353,75 @@ class DecisionEngine:
             )
 
         decision, model_info = self._decide(self._query(text, session))
+
+        # A correction that does not name an action on its own ("actually,
+        # tomorrow") keeps the capability of the instruction it corrects. The
+        # inherited capability is checked against the *preceding* text, which
+        # is the text that mentioned it.
+        support_text = text
+        if decision.tool is None and correction.is_correction and correction.preceding:
+            previous, _ = self._decide(self._query(correction.preceding, session))
+            if previous.tool and not self._is_control(previous.tool):
+                decision.tool = previous.tool
+                decision.confidence = max(decision.confidence, previous.confidence * 0.9)
+                support_text = correction.preceding
+
+        decision = self._anchor_to_utterance(decision, support_text, session)
         return self._finish_segment(
             segment, session, request, decision, model_info, correction, text
         )
+
+    def _anchor_to_utterance(
+        self, decision: Decision, text: str, session: SessionState
+    ) -> Decision:
+        """Keep the decision model inside what the utterance actually says.
+
+        Measured with the real model: on a *new* answer space the checkpoint
+        answers confidently but arbitrarily - "order dinner for me" and
+        "xyzzy plugh" both came back as "read my notes". Its confidence is
+        not calibrated for an answer space it was not trained on (the library
+        says so itself), so it is never allowed to introduce a capability the
+        utterance does not mention.
+
+        The model may still choose *between* the capabilities the utterance
+        supports, and that is where it earns its place.
+        """
+        if decision.source is not DecisionSource.MODEL:
+            return decision
+        tool = decision.tool
+        if not tool or self._is_control(tool):
+            return decision
+
+        catalog = self.registry.catalog
+        support = catalog.tool_support(text, tool)
+        if support > 0:
+            # The utterance mentions this capability. Keep the model's choice.
+            return decision
+
+        # The model named a capability the utterance never mentions.
+        candidate, score = catalog.match_tool(text)
+        if candidate is None:
+            # A destination that only one capability owns identifies that
+            # capability on its own: "no, I meant Spotify" is an "open".
+            candidate, score = self._capability_from_destination(text)
+        if candidate and candidate != tool and not self._is_control(candidate):
+            decision.details["anchor"] = {
+                "rejected_tool": tool,
+                "reason": "the utterance does not mention that capability",
+                "chosen": candidate,
+            }
+            decision.tool = candidate
+            decision.confidence = max(decision.confidence, score)
+            return decision
+
+        decision.details["anchor"] = {
+            "rejected_tool": tool,
+            "reason": "the utterance does not mention that capability",
+            "chosen": None,
+        }
+        decision.tool = None
+        decision.confidence = 0.0
+        return decision
 
     def _finish_segment(
         self,
@@ -334,15 +437,6 @@ class DecisionEngine:
         tool = decision.tool
         destination = decision.destination
         confidence = decision.confidence
-
-        # A correction that does not name an action on its own ("actually,
-        # tomorrow") keeps the capability of the instruction it corrects.
-        if correction.is_correction and not self._is_control(tool):
-            if tool is None and correction.preceding:
-                previous, _ = self._decide(self._query(correction.preceding, session))
-                if previous.tool and not self._is_control(previous.tool):
-                    tool = previous.tool
-                    confidence = max(confidence, previous.confidence * 0.9)
 
         # An elided tool ("continue what I was doing") reuses the last tool.
         if tool is None and session.last_tool:
@@ -455,6 +549,9 @@ class DecisionEngine:
             return self._last_model_info()
         model_infos = [info for info in infos if info.source is DecisionSource.MODEL]
         base = model_infos[0] if model_infos else infos[0]
+        # A copy: the model's own provenance object is shared, and the sum of
+        # the latencies belongs to this turn only.
+        base = base.model_copy(deep=True)
         base.latency_ms = round(sum(info.latency_ms for info in infos), 3)
         return base
 
@@ -474,14 +571,36 @@ class DecisionEngine:
         entities: list[Entity] = []
         hints = extract_argument_hints(text)
 
+        # The destinations the utterance actually mentions. The model may
+        # choose *between* them, but it may not introduce one that is not
+        # there - a model that is confident enough to invent a destination
+        # would otherwise turn "xyzzy plugh" into "Opening Google".
+        mentioned = self._mentioned_destinations(spec, text)
+        model_destination = (
+            decision.destination
+            if decision.destination and decision.destination in mentioned
+            else None
+        )
+
         for arg in spec.arguments:
             if arg.type == ARG_ENUM:
                 value = _match_enum(arg.enum, text)
-                if value is None and decision.destination and decision.destination in arg.enum:
-                    value = decision.destination
+                if model_destination and model_destination in arg.enum:
+                    value = model_destination
+                if value is None:
+                    # A single typo in a service name ("open spotfy").
+                    fuzzy, _score = self.registry.catalog.match_destination(text)
+                    if fuzzy and fuzzy in arg.enum:
+                        value = fuzzy
                 if value is not None:
                     arguments[arg.name] = value
-                    entities.append(Entity(name=arg.name, value=value, source="parser"))
+                    entities.append(
+                        Entity(
+                            name=arg.name,
+                            value=value,
+                            source="model" if value == model_destination else "parser",
+                        )
+                    )
             elif arg.type == ARG_DURATION:
                 if hints.duration_seconds is not None:
                     arguments[arg.name] = hints.duration_seconds
@@ -506,24 +625,76 @@ class DecisionEngine:
                         Entity(name=arg.name, value=value, source="parser")
                     )
 
-        # The destination the model picked wins over a plain text match - but
-        # only when the model was actually sure. A low confidence destination
-        # is a guess and must not become an argument.
-        if decision.destination and decision.destination_confidence >= DESTINATION_CONFIDENCE_FLOOR:
-            dest_arg = spec.argument("destination")
-            if dest_arg is not None and dest_arg.name not in arguments:
-                arguments[dest_arg.name] = decision.destination
-                entities.append(
-                    Entity(name=dest_arg.name, value=decision.destination, source="model")
-                )
+        # The destination the model picked was already applied above, when it
+        # was one of the destinations the utterance mentions.
 
         # Session context fills arguments the utterance left out, but only for
-        # the same tool - that is what makes "play that again" work.
+        # the same tool - that is what makes "play that again" work. An
+        # argument that must not be carried over (a time) is left alone.
         if session.last_tool == spec.name:
             for key, value in session.last_arguments.items():
+                argument = spec.argument(key)
+                if argument is not None and not argument.remember:
+                    continue
                 arguments.setdefault(key, value)
 
         return arguments, entities
+
+    def _ensure_client_sweeper(self) -> None:
+        """Start the background sweep that expires unanswered client actions.
+
+        It is a daemon thread, so it never keeps the process alive.
+        """
+        with self._sweeper_lock:
+            if self._sweeper is not None and self._sweeper.is_alive():
+                return
+            thread = threading.Thread(
+                target=self._sweep_client_actions,
+                name="sidekick-client-sweeper",
+                daemon=True,
+            )
+            self._sweeper = thread
+            thread.start()
+
+    def _sweep_client_actions(self) -> None:
+        while not self._stop_sweeper.is_set():
+            try:
+                self.expire_client_actions()
+            except Exception:  # noqa: BLE001 - a sweep must never kill the process
+                pass
+            self._stop_sweeper.wait(CLIENT_SWEEP_INTERVAL_SECONDS)
+
+    def _capability_from_destination(self, text: str) -> tuple[str | None, float]:
+        """The capability a mentioned destination identifies on its own.
+
+        "No, I meant Spotify" names no action, but Spotify belongs to exactly
+        one capability, so that capability is what the user means.
+        """
+        catalog = self.registry.catalog
+        for spec in catalog:
+            for destination in spec.destinations:
+                aliases = (destination, *spec.destination_aliases.get(destination, ()))
+                lowered = text.lower()
+                mentioned = any(contains_phrase(lowered, alias) for alias in aliases)
+                if not mentioned:
+                    continue
+                owners = catalog.destination_owners(destination)
+                if len(owners) == 1:
+                    return owners[0], 0.5
+        return None, 0.0
+
+    @staticmethod
+    def _mentioned_destinations(spec: ToolSpec, text: str) -> set[str]:
+        """The destinations of a tool that the utterance actually mentions."""
+        found: set[str] = set()
+        lowered = text.lower()
+        for destination in spec.destinations:
+            aliases = (destination, *spec.destination_aliases.get(destination, ()))
+            for alias in aliases:
+                if contains_phrase(lowered, alias):
+                    found.add(destination)
+                    break
+        return found
 
     @staticmethod
     def _capture_text(
@@ -535,12 +706,25 @@ class DecisionEngine:
         """Capture a free-text argument according to its capture mode."""
         if arg.capture == CAPTURE_NONE:
             return None
+        if arg.capture == CAPTURE_WHEN:
+            expression = find_when_expression(text)
+            if expression is None:
+                return None
+            return re.sub(r"^at\s+", "", expression, flags=re.IGNORECASE).strip()
+        if arg.capture == CAPTURE_EXCEPT_WHEN:
+            expression = find_when_expression(text)
+            if expression is None:
+                return extract_remainder(text, spec.aliases)
+            without = text.replace(expression, " ")
+            return extract_remainder(without, spec.aliases) or _clean_remainder(without)
         if arg.capture in (CAPTURE_QUOTED, CAPTURE_AUTO):
             if hints.text_value:
                 return hints.text_value
             if arg.capture == CAPTURE_QUOTED:
                 return None
         remainder = extract_remainder(text, spec.aliases)
+        if remainder:
+            remainder = remainder.strip(" ,.;:!?-")
         return remainder
 
     # ------------------------------------------------------------------
@@ -572,14 +756,7 @@ class DecisionEngine:
                     )
                 )
                 if clarification is None:
-                    clarification = Clarification(
-                        question=(
-                            "I did not catch which action you want. "
-                            "Which of these did you mean?"
-                        ),
-                        options=self._tool_options(),
-                        missing_arguments=[],
-                    )
+                    clarification = self._unsupported_clarification(segment.text)
                 continue
 
             # Control intents are core orchestration, not capabilities.
@@ -615,6 +792,10 @@ class DecisionEngine:
 
             arguments = dict(segment.arguments)
             available = self.registry.is_available(spec.name)
+            if not available and spec.execution_target == "client":
+                # The browser client runs this capability. It is not "missing":
+                # the core plans it and the client executes it.
+                available = True
             decision = self.policy.evaluate(spec, arguments, tool_available=available)
 
             action = Action(
@@ -772,6 +953,33 @@ class DecisionEngine:
                 affected.extend(self._run_control_action(action, session, events))
                 session.add_action(action)
                 continue
+            spec = self.registry.spec(action.tool)
+            if spec is not None and spec.execution_target == "client":
+                # The browser client runs this one. The core plans it and
+                # waits for the client to report the real outcome - with a
+                # deadline, so it cannot stay pending forever.
+                action.state = ActionStatus.PENDING
+                action.result = {
+                    "execution_target": "client",
+                    "status": "awaiting_client",
+                    "capability": spec.name,
+                    "client_deadline": time.time() + CLIENT_ACTION_TIMEOUT_SECONDS,
+                }
+                action.touch()
+                events.append(
+                    Event(
+                        type="action.awaiting_client",
+                        action_id=action.action_id,
+                        message=f"{spec.name} is executed by the app",
+                        data={
+                            "capability": spec.name,
+                            "deadline_seconds": CLIENT_ACTION_TIMEOUT_SECONDS,
+                        },
+                    )
+                )
+                session.add_action(action)
+                self._ensure_client_sweeper()
+                continue
             self._execute_action(action, session, events)
             session.add_action(action)
         return actions + affected
@@ -788,7 +996,11 @@ class DecisionEngine:
         affected: list[Action] = []
         message = ""
         try:
-            if name == "control.cancel":
+            if name == "control.capabilities":
+                inventory = self.capability_inventory()
+                message = self._capability_message(inventory)
+                action.result = {"capabilities": inventory, "message": message}
+            elif name == "control.cancel":
                 affected, message = self._do_cancel(session, events)
             elif name == "control.pause":
                 affected, message = self._do_pause(session, events)
@@ -823,12 +1035,61 @@ class DecisionEngine:
         except Exception as exc:  # noqa: BLE001 - controls must never crash a turn
             message = f"the control could not be applied: {exc}"
         action.state = ActionStatus.SUCCEEDED
-        action.result = {"message": message}
+        if action.result is None:
+            action.result = {"message": message}
         action.touch()
         events.append(
             Event(type="action.succeeded", action_id=action.action_id, message=message)
         )
         return affected
+
+    # ------------------------------------------------------------------
+    # Capability inventory
+    # ------------------------------------------------------------------
+
+    def capability_inventory(self) -> list[dict[str, Any]]:
+        """Everything the product can do, with the truth about each one."""
+        inventory: list[dict[str, Any]] = []
+        for spec in self.registry.catalog:
+            available = self.registry.is_available(spec.name)
+            if spec.execution_target == "client":
+                state = "client"
+                detail = spec.detail or spec.description
+            elif available:
+                state = "live"
+                detail = spec.detail or spec.description
+            else:
+                state = "unavailable"
+                detail = "declared, but no adapter is wired up in this deployment"
+            inventory.append(
+                {
+                    "id": spec.name,
+                    "label": spec.human_label,
+                    "detail": detail,
+                    "state": state,
+                    "owner": spec.owner,
+                    "execution_target": spec.execution_target,
+                }
+            )
+        return inventory
+
+    def _capability_message(self, inventory: list[dict[str, Any]]) -> str:
+        """What the product can do, told honestly.
+
+        A capability the browser client runs is not something the *core* did,
+        so it is named separately instead of being mixed in with the things
+        the server can do.
+        """
+        server = [item["label"] for item in inventory if item["state"] == "live"]
+        client = [item["label"] for item in inventory if item["state"] == "client"]
+        parts: list[str] = []
+        if server:
+            parts.append("I can " + ", ".join(server))
+        if client:
+            parts.append("in the app I can " + ", ".join(client))
+        if not parts:
+            return "I do not have any working capabilities in this deployment yet."
+        return ". ".join(parts) + "."
 
     def _resume_task_id_for_control(self, session: SessionState) -> str | None:
         suspended = session.suspended_tasks()
@@ -873,8 +1134,10 @@ class DecisionEngine:
 
         if result.ongoing:
             # The work continues in the background: the action stays running
-            # until the adapter reports the final outcome.
+            # until the adapter reports the final outcome. What is already
+            # known (the due time, the job id) is recorded now.
             action.state = ActionStatus.RUNNING
+            action.result = dict(result.data)
             action.touch()
             task.state = ActionStatus.RUNNING
             task.touch()
@@ -1278,6 +1541,114 @@ class DecisionEngine:
         )
         return action
 
+    def complete_action(
+        self,
+        session_id: str,
+        action_id: str,
+        *,
+        status: str,
+        result: dict[str, Any] | None = None,
+        error: ActionError | None = None,
+    ) -> Action:
+        """Record the outcome a *client* reported for one of its actions.
+
+        The browser client executes the capabilities the core planned for it
+        (``execution_target == "client"``) and reports back here. The core
+        never claims the client did something it did not report.
+
+        Only a client-executed action can be completed this way: completing a
+        server action would let a client claim work the server did.
+        """
+        from .errors import ConflictError, NotFoundError
+
+        session = self.sessions.get(session_id)
+        action = session.get_action(action_id)
+        if action is None:
+            raise NotFoundError(f"unknown action: {action_id}")
+        spec = self.registry.spec(action.tool)
+        if spec is None or spec.execution_target != "client":
+            raise ConflictError(
+                "only a capability the client executes can be completed by the client",
+                details={"tool": action.tool, "execution_target": spec.execution_target if spec else None},
+            )
+        if action.state not in (
+            ActionStatus.PENDING,
+            ActionStatus.RUNNING,
+        ):
+            raise ConflictError(
+                "the action already finished",
+                details={"state": action.state.value},
+            )
+
+        state = {
+            "succeeded": ActionStatus.SUCCEEDED,
+            "failed": ActionStatus.FAILED,
+            "cancelled": ActionStatus.CANCELLED,
+            "pending": ActionStatus.PENDING,
+            "running": ActionStatus.RUNNING,
+        }.get(status.lower())
+        if state is None:
+            raise ConflictError(f"unknown status: {status}")
+
+        action.state = state
+        if result is not None:
+            action.result = result
+        if error is not None:
+            action.error = error
+        action.touch()
+        session.log_event(
+            Event(
+                type=f"action.{action.state.value}",
+                action_id=action.action_id,
+                message=action.error.message if action.error else f"{action.tool} {action.state.value}",
+                data={"result": action.result} if action.result is not None else {},
+            )
+        )
+        return action
+
+    def expire_client_actions(self, now: float | None = None) -> list[Action]:
+        """Fail the client actions the client never reported on.
+
+        A capability the browser was supposed to run must not stay ``pending``
+        forever: after the deadline the action fails with a clear reason
+        instead of hanging.
+        """
+        expired: list[Action] = []
+        moment = now if now is not None else time.time()
+        for session_id in self.sessions.session_ids():
+            session = self.sessions.peek(session_id)
+            if session is None:
+                continue
+            for action in session.actions.values():
+                if action.state is not ActionStatus.PENDING:
+                    continue
+                spec = self.registry.spec(action.tool)
+                if spec is None or spec.execution_target != "client":
+                    continue
+                deadline = (action.result or {}).get("client_deadline")
+                if not isinstance(deadline, (int, float)) or moment < deadline:
+                    continue
+                action.state = ActionStatus.FAILED
+                action.error = ActionError(
+                    code="client_timeout",
+                    message=(
+                        f"the app did not report a result for '{action.tool}' "
+                        "in time"
+                    ),
+                    retryable=True,
+                    timeout=True,
+                )
+                action.touch()
+                session.log_event(
+                    Event(
+                        type="action.failed",
+                        action_id=action.action_id,
+                        message=action.error.message,
+                    )
+                )
+                expired.append(action)
+        return expired
+
     # ------------------------------------------------------------------
     # Event streaming
     # ------------------------------------------------------------------
@@ -1344,6 +1715,10 @@ class DecisionEngine:
                 ActionStatus.RUNNING,
                 ActionStatus.SUCCEEDED,
             ):
+                result = action.result if isinstance(action.result, dict) else {}
+                message = result.get("message")
+                if isinstance(message, str) and message:
+                    return message
                 phrase = self._action_phrase(action)
                 if phrase:
                     if corrected:
@@ -1436,6 +1811,43 @@ class DecisionEngine:
     def _tool_options(self) -> list[str]:
         return sorted(spec.name for spec in self.registry.catalog)
 
+    def _unsupported_clarification(self, text: str = "") -> Clarification:
+        """An honest answer for a request the product cannot fulfil.
+
+        Saying "I did not catch which action you want" is not the same as
+        "I do not have a capability for that". The options are the human
+        readable names of what the product *can* do, and a near miss is
+        offered when the utterance was one word away from a real capability.
+        """
+        inventory = self.capability_inventory()
+        options = [
+            item["label"]
+            for item in inventory
+            if item["state"] in ("live", "client")
+        ]
+        if not options:
+            return Clarification(
+                question=(
+                    "I do not have a working capability for that yet. "
+                    "There is nothing I can do yet in this deployment."
+                ),
+                options=[],
+                missing_arguments=[],
+            )
+
+        question = (
+            "I do not have a capability for that yet. "
+            "What I can do: " + ", ".join(options) + "."
+        )
+        # A "did you mean" is only offered where it can be reliable. A loose
+        # comparison cannot tell "find a restaurant" from "find a movie", so
+        # the answer lists what the product can do instead of guessing.
+        return Clarification(
+            question=question,
+            options=options,
+            missing_arguments=[],
+        )
+
     def _describe_pending(self, session: SessionState) -> str:
         parts: list[str] = []
         for action in session.actions.values():
@@ -1490,6 +1902,13 @@ class DecisionEngine:
 # ----------------------------------------------------------------------
 # Helpers
 # ----------------------------------------------------------------------
+
+
+def _clean_remainder(text: str) -> str | None:
+    """Strip the filler words from a leftover text."""
+    value = re.sub(r"\s+", " ", text).strip(" ,.;:-")
+    value = re.sub(r"^(?:that|to|for|about|with|and|me|my|i)\s+", "", value, flags=re.I)
+    return value or None
 
 
 class _MissingAsEmpty(dict):

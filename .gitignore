@@ -62,3 +62,6 @@ logs/
 # The core's local tools (notes, timers) write here.
 sidekick_runtime/
 .sidekick_runtime/
+
+# Local audit runs (machine specific paths)
+reports/audit-*.json

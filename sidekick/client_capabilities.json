@@ -1,0 +1,70 @@
+{
+  "owner": "agent3",
+  "note": "Capabilities that the browser client executes locally. The core plans them and reports them honestly; the client runs them and reports the outcome back through POST /v1/actions/{id}/complete.",
+  "capabilities": [
+    {
+      "id": "movie.play",
+      "label": "play a movie",
+      "detail": "Plays the bundled open-licensed film with the real subtitle timing, and the movie companion reacts to what is actually said.",
+      "aliases": [
+        "play a movie",
+        "watch a movie",
+        "find a movie",
+        "put on a film",
+        "start the movie"
+      ],
+      "arguments": [
+        {
+          "name": "title",
+          "type": "string",
+          "required": false,
+          "description": "which film to play"
+        }
+      ],
+      "speech_template": "Playing {title}."
+    },
+    {
+      "id": "media.play",
+      "label": "play music",
+      "detail": "Plays music in the client and keeps the playback controls in sync with the voice conversation.",
+      "aliases": [
+        "play some music",
+        "play music",
+        "play some",
+        "put on some music",
+        "listen to music",
+        "play a song"
+      ],
+      "arguments": [
+        {
+          "name": "query",
+          "type": "string",
+          "required": false,
+          "description": "what to play"
+        }
+      ],
+      "speech_template": "Playing {query}."
+    },
+    {
+      "id": "game.start",
+      "label": "play a game",
+      "detail": "Starts one of the local games, for example chess.",
+      "aliases": [
+        "start a game",
+        "play a game",
+        "play chess",
+        "start chess",
+        "let's play chess"
+      ],
+      "arguments": [
+        {
+          "name": "game",
+          "type": "string",
+          "required": false,
+          "description": "which game to start"
+        }
+      ],
+      "speech_template": "Starting {game}."
+    }
+  ]
+}
