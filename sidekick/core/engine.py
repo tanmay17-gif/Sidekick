@@ -55,6 +55,7 @@ from .parsing import (
     ControlIntent,
     CorrectionSignal,
     Segment,
+    bare_marker_is_control,
     detect_correction,
     extract_argument_hints,
     extract_remainder,
@@ -389,6 +390,11 @@ class DecisionEngine:
     def _is_control(tool: str | None) -> bool:
         return bool(tool) and tool.startswith("control.")
 
+    @staticmethod
+    def _is_trailing(segment: ResolvedSegment) -> bool:
+        """Is the correction marker at the end of the segment?"""
+        return bool(segment.correction and segment.correction.is_trailing)
+
     def _decide(self, query: DecisionQuery) -> tuple[Decision, DecisionModelInfo]:
         """Run the primary model, fall back deterministically on failure."""
         started = time.perf_counter()
@@ -618,9 +624,11 @@ class DecisionEngine:
             action.job_id = action.action_id
             actions.append(action)
 
-            if segment.is_correction:
+            if segment.is_correction and not self._is_trailing(segment):
                 # A correction replaces the actions planned before it in the
-                # same turn, before any of them can execute.
+                # same turn, before any of them can execute. A trailing
+                # marker ("echo hello instead") refers to the previous
+                # request instead, so it leaves this turn's plan alone.
                 self._supersede_plan_actions(actions[:-1], action, events)
 
             if not available:
