@@ -172,3 +172,37 @@ class EventBus:
     def known_jobs(self) -> Iterable[str]:
         with self._lock:
             return tuple(self._history.keys())
+
+    # -- durability --------------------------------------------------------
+    def restore(self, events: Iterable[Event]) -> int:
+        """Rehydrate the bus with events that were persisted before a restart.
+
+        The sequence numbers are restored with the events, so a client that
+        reconnects with ``?after=<seq>`` continues exactly where it left off
+        instead of seeing a gap or an empty stream.
+
+        Returns the number of restored events.
+        """
+        restored = 0
+        with self._lock:
+            for event in events:
+                history = self._history.setdefault(event.job_id, [])
+                if any(existing.seq == event.seq for existing in history):
+                    continue
+                history.append(event)
+                if event.seq > self._seq.get(event.job_id, 0):
+                    self._seq[event.job_id] = event.seq
+                restored += 1
+            for job_id, history in self._history.items():
+                history.sort(key=lambda e: e.seq)
+        return restored
+
+    def prune(self, job_ids: Iterable[str]) -> int:
+        """Forget the history of the given jobs. Returns how many were removed."""
+        removed = 0
+        with self._lock:
+            for job_id in job_ids:
+                if self._history.pop(job_id, None) is not None:
+                    removed += 1
+                self._seq.pop(job_id, None)
+        return removed

@@ -136,7 +136,10 @@ class ExecutionRequestHandler(BaseHTTPRequestHandler):
                     return
             self._send_json(404, {"error": {"code": "not_found", "message": "Unknown endpoint.", "retryable": False, "timeout": False}})
         except SidekickError as exc:
-            self._send_error_payload(exc, 400)
+            # An unknown job is a 404 wherever it is addressed; anything else
+            # is a bad request.
+            status = 404 if exc.code == "job_not_found" else 400
+            self._send_error_payload(exc, status)
         except Exception as exc:  # noqa: BLE001
             self._send_json(500, {"error": {"code": "internal_error", "message": str(exc), "retryable": False, "timeout": False}})
 
@@ -144,12 +147,17 @@ class ExecutionRequestHandler(BaseHTTPRequestHandler):
     def _health(self) -> Dict[str, Any]:
         manager = self.service.job_manager
         jobs = manager.list_jobs()
+        manager = self.service.job_manager
         return {
             "status": "ok",
             "service": "sidekick-execution",
             "version": "0.1.0",
             "active_jobs": sum(1 for a in jobs if not a.is_terminal),
             "total_jobs": len(jobs),
+            # Whether the job state and the event log survive a restart. An
+            # in-memory service says so here rather than pretending.
+            "durable": manager.durable,
+            "store_path": manager.store_path,
         }
 
     def _submit(self, body: Dict[str, Any]) -> None:
@@ -165,13 +173,27 @@ class ExecutionRequestHandler(BaseHTTPRequestHandler):
         confirmation_token = body.get("confirmation_token")
         if confirmation_token is not None and not isinstance(confirmation_token, str):
             raise SidekickError("invalid_request", "'confirmation_token' must be a string.")
+        idempotency_key = body.get("idempotency_key")
+        if idempotency_key is not None:
+            if not isinstance(idempotency_key, str) or not idempotency_key.strip():
+                raise SidekickError(
+                    "invalid_request", "'idempotency_key' must be a non-empty string."
+                )
+            if len(idempotency_key) > 200:
+                raise SidekickError(
+                    "invalid_request", "'idempotency_key' must not exceed 200 characters."
+                )
         payload = self.service.job_manager.submit(
             tool,
             arguments,
             session_id=session_id,
             confirmation_token=confirmation_token,
+            idempotency_key=idempotency_key,
         )
-        self._send_json(202, payload)
+        # A replayed submission is not a new job, so it is answered with 200
+        # rather than 202.
+        status = 200 if payload.get("idempotent_replay") else 202
+        self._send_json(status, payload)
 
     def _approve(self, action_id: str, body: Dict[str, Any]) -> None:
         token = body.get("confirmation_token")
@@ -185,7 +207,8 @@ class ExecutionRequestHandler(BaseHTTPRequestHandler):
 
     # -- SSE ---------------------------------------------------------------
     def _stream_events(self, job_id: str, after: int) -> None:
-        bus = self.service.job_manager.events
+        manager = self.service.job_manager
+        bus = manager.events
         subscription = bus.subscribe(job_id)
         self.send_response(200)
         self.send_header("Content-Type", SSE_CONTENT_TYPE)
@@ -198,11 +221,18 @@ class ExecutionRequestHandler(BaseHTTPRequestHandler):
             for event in bus.replay(job_id, after):
                 if self._write_event(event):
                     return
+            if self._job_is_terminal(job_id):
+                # The job already finished and the client asked for events
+                # after the last one: there is nothing more to send, so the
+                # stream ends now instead of holding the connection open.
+                return
             deadline = time.monotonic() + 3600
             while time.monotonic() < deadline:
                 try:
                     event = subscription.get(timeout=1.0)
                 except queue.Empty:
+                    if self._job_is_terminal(job_id):
+                        return
                     self.wfile.write(b": keep-alive\n\n")
                     self.wfile.flush()
                     continue
@@ -213,6 +243,14 @@ class ExecutionRequestHandler(BaseHTTPRequestHandler):
         finally:
             bus.unsubscribe(job_id, subscription)
             self.close_connection = True
+
+    def _job_is_terminal(self, job_id: str) -> bool:
+        """True when the job has reached a terminal state (or is unknown)."""
+        try:
+            action = self.service.job_manager.get(job_id)
+        except SidekickError:
+            return True
+        return action.is_terminal
 
     def _write_event(self, event) -> bool:
         """Write one SSE frame. Returns True when the job reached its end."""

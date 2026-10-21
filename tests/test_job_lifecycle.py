@@ -240,53 +240,130 @@ class ApprovalBindingTests(unittest.TestCase):
 
 
 class RestartRecoveryTests(TempDirTestCase):
-    def test_interrupted_jobs_are_recovered_as_failed(self) -> None:
-        store_path = self.tmp_path / "jobs.json"
-        store = JobStore(store_path)
-        store.save(
-            [
-                JobRecord(
-                    job_id="job-running",
-                    action={
-                        "action_id": "job-running",
-                        "tool": "echo",
-                        "arguments": {},
-                        "approval_required": False,
-                        "state": RUNNING,
-                        "superseded_by": None,
-                        "result": None,
-                        "error": None,
-                        "timestamps": {"created": "2026-01-01T00:00:00Z", "updated": "2026-01-01T00:00:00Z"},
-                    },
-                ),
-                JobRecord(
-                    job_id="job-done",
-                    action={
-                        "action_id": "job-done",
-                        "tool": "echo",
-                        "arguments": {},
-                        "approval_required": False,
-                        "state": SUCCEEDED,
-                        "superseded_by": None,
-                        "result": {"ok": True},
-                        "error": None,
-                        "timestamps": {"created": "2026-01-01T00:00:00Z", "updated": "2026-01-01T00:00:00Z"},
-                    },
-                ),
-            ]
+    """What survives a restart, and what does not."""
+
+    def _store(self) -> JobStore:
+        store = JobStore(self.tmp_path / "jobs.json", flush_interval=0.05)
+        self.addCleanup(store.close)
+        return store
+
+    def _running_record(self, job_id: str = "job-running") -> JobRecord:
+        return JobRecord(
+            job_id=job_id,
+            action={
+                "action_id": job_id,
+                "tool": "echo",
+                "arguments": {},
+                "approval_required": False,
+                "state": RUNNING,
+                "superseded_by": None,
+                "result": None,
+                "error": None,
+                "timestamps": {
+                    "created": "2026-01-01T00:00:00Z",
+                    "updated": "2026-01-01T00:00:00Z",
+                },
+            },
         )
 
-        manager = JobManager(make_registry(), ApprovalStore(), EventBus(), store=JobStore(store_path))
+    def test_interrupted_jobs_are_recovered_as_failed(self) -> None:
+        store = self._store()
+        store.put_job(self._running_record())
+        store.put_job(
+            JobRecord(
+                job_id="job-done",
+                action={
+                    "action_id": "job-done",
+                    "tool": "echo",
+                    "arguments": {},
+                    "approval_required": False,
+                    "state": SUCCEEDED,
+                    "superseded_by": None,
+                    "result": {"ok": True},
+                    "error": None,
+                    "timestamps": {
+                        "created": "2026-01-01T00:00:00Z",
+                        "updated": "2026-01-01T00:00:00Z",
+                    },
+                },
+            )
+        )
+        store.flush()
+
+        manager = JobManager(make_registry(), ApprovalStore(), EventBus(), store=JobStore(self.tmp_path / "jobs.json"))
         self.addCleanup(manager.shutdown)
 
         interrupted = manager.get("job-running")
         self.assertEqual(interrupted.state, FAILED)
         self.assertIsNotNone(interrupted.error)
         self.assertEqual(interrupted.error.code, "job_interrupted")
+        # The user must be told that the work may be half applied.
+        self.assertIn("partially applied", interrupted.error.message)
 
         finished = manager.get("job-done")
         self.assertEqual(finished.state, SUCCEEDED)
         self.assertEqual(finished.result, {"ok": True})
+
+    def test_the_event_log_survives_a_restart(self) -> None:
+        """A client that reconnects after a restart still sees its history."""
+        store = self._store()
+        store.put_job(self._running_record("job-events"))
+        store.append_event(
+            "job-events",
+            {
+                "job_id": "job-events",
+                "action_id": "job-events",
+                "seq": 1,
+                "ts": "2026-01-01T00:00:00.000Z",
+                "type": "job.created",
+                "status": "pending",
+                "message": "Job accepted.",
+                "data": {"tool": "echo"},
+            },
+        )
+        store.append_event(
+            "job-events",
+            {
+                "job_id": "job-events",
+                "action_id": "job-events",
+                "seq": 2,
+                "ts": "2026-01-01T00:00:01.000Z",
+                "type": "job.progress",
+                "status": "running",
+                "message": "half way",
+                "data": {},
+            },
+        )
+        store.flush()
+
+        bus = EventBus()
+        manager = JobManager(make_registry(), ApprovalStore(), bus, store=JobStore(self.tmp_path / "jobs.json"))
+        self.addCleanup(manager.shutdown)
+
+        # The history is restored, with its sequence numbers.
+        restored = bus.history("job-events")
+        self.assertEqual([e.seq for e in restored[:2]], [1, 2])
+        # A client resuming from seq 1 receives the later events without a gap.
+        resumed = bus.replay("job-events", after_seq=1)
+        self.assertEqual([e.seq for e in resumed], [2, 3])
+        self.assertEqual(resumed[-1].type, JOB_ERROR)
+        self.assertEqual(resumed[-1].data["error"]["code"], "job_interrupted")
+
+    def test_a_recovered_job_is_never_reported_as_succeeded(self) -> None:
+        store = self._store()
+        store.put_job(self._running_record("job-x"))
+        store.flush()
+        manager = JobManager(make_registry(), ApprovalStore(), EventBus(), store=JobStore(self.tmp_path / "jobs.json"))
+        self.addCleanup(manager.shutdown)
+        action = manager.get("job-x")
+        self.assertNotEqual(action.state, SUCCEEDED)
+        self.assertEqual(action.state, FAILED)
+
+    def test_an_in_memory_service_says_it_is_not_durable(self) -> None:
+        manager = JobManager(make_registry(), ApprovalStore(), EventBus())
+        self.addCleanup(manager.shutdown)
+        self.assertFalse(manager.durable)
+        self.assertIsNone(manager.store_path)
 
 
 if __name__ == "__main__":

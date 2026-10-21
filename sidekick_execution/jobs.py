@@ -53,6 +53,7 @@ from .contracts import (
     utc_now_iso,
 )
 from .errors import JOB_INTERRUPTED, JOB_NOT_CANCELLABLE, SidekickError
+from .store import JobRecord, JobStore
 from .events import (
     JOB_CREATED,
     JOB_ERROR,
@@ -66,77 +67,6 @@ from .events import (
 
 class JobTransitionError(SidekickError):
     """Raised when an illegal state transition is attempted."""
-
-
-@dataclass
-class JobRecord:
-    """The persisted form of a job."""
-
-    job_id: str
-    action: Dict[str, Any]
-    session_id: Optional[str] = None
-    created_at: str = field(default_factory=utc_now_iso)
-    updated_at: str = field(default_factory=utc_now_iso)
-
-    def to_dict(self) -> Dict[str, Any]:
-        return {
-            "job_id": self.job_id,
-            "action": self.action,
-            "session_id": self.session_id,
-            "created_at": self.created_at,
-            "updated_at": self.updated_at,
-        }
-
-    @classmethod
-    def from_dict(cls, raw: Dict[str, Any]) -> "JobRecord":
-        return cls(
-            job_id=raw.get("job_id", ""),
-            action=raw.get("action", {}),
-            session_id=raw.get("session_id"),
-            created_at=raw.get("created_at", utc_now_iso()),
-            updated_at=raw.get("updated_at", utc_now_iso()),
-        )
-
-
-class JobStore:
-    """A tiny JSON-file job store used for restart recovery."""
-
-    def __init__(self, path: Path) -> None:
-        self.path = Path(path)
-        self._lock = threading.Lock()
-
-    def load(self) -> List[JobRecord]:
-        if not self.path.exists():
-            return []
-        try:
-            raw = json.loads(self.path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
-            return []
-        records = raw.get("jobs") if isinstance(raw, dict) else None
-        if not isinstance(records, list):
-            return []
-        out: List[JobRecord] = []
-        for item in records:
-            if isinstance(item, dict):
-                out.append(JobRecord.from_dict(item))
-        return out
-
-    def save(self, records: List[JobRecord]) -> None:
-        with self._lock:
-            try:
-                self.path.parent.mkdir(parents=True, exist_ok=True)
-                tmp = self.path.with_suffix(self.path.suffix + ".tmp")
-                tmp.write_text(
-                    json.dumps(
-                        {"jobs": [r.to_dict() for r in records]}, indent=2, default=str
-                    ),
-                    encoding="utf-8",
-                )
-                os.replace(tmp, self.path)
-            except OSError:
-                # Persistence is best-effort; a failure here must not break the
-                # running action.
-                pass
 
 
 @dataclass
@@ -182,6 +112,12 @@ class JobManager:
         self._records: Dict[str, JobRecord] = {}
         self._cancel_events: Dict[str, threading.Event] = {}
         self._sessions: Dict[str, List[str]] = {}
+        # Idempotency keys are honoured whether or not a durable store is
+        # configured: preventing a duplicate execution is a correctness
+        # property, not a durability property.
+        self._idempotency: Dict[str, str] = {}
+        self._idempotency_times: Dict[str, float] = {}
+        self.idempotency_ttl = 3600.0
         self._lock = threading.RLock()
         self._executor = ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix="sidekick-job")
 
@@ -190,9 +126,26 @@ class JobManager:
 
     # -- recovery ----------------------------------------------------------
     def _recover(self) -> None:
-        """Mark jobs that were in flight when the process stopped as failed."""
-        for record in self.store.load() if self.store else []:
+        """Recover the state of jobs that were in flight when the process stopped.
+
+        * the persisted event log is rehydrated, so a client that reconnects
+          with ``?after=<seq>`` sees the history it missed;
+        * a job that was running when the process died becomes ``failed``
+          with the error code ``job_interrupted``. It is never reported as
+          succeeded and it is never silently resumed - the running command
+          cannot be re-attached to.
+        """
+        if self.store is None:
+            return
+        for record in self.store.all_jobs():
             action = Action.from_dict(record.action)
+            restored = self.events.restore(
+                self._events_from_store(record.job_id)
+            )
+            if restored:
+                # The bus already knows the highest sequence number, so the
+                # next event continues without a gap.
+                pass
             if action.state in (SUCCEEDED, FAILED, CANCELLED, "superseded"):
                 self._jobs[action.action_id] = action
                 self._records[action.action_id] = record
@@ -200,7 +153,11 @@ class JobManager:
             action.state = FAILED
             action.error = ActionError(
                 code=JOB_INTERRUPTED,
-                message="The job was interrupted by a service restart and did not complete.",
+                message=(
+                    "The job was interrupted by a service restart and did not complete. "
+                    "Its work may be partially applied - inspect the workspace before "
+                    "retrying."
+                ),
                 retryable=True,
             )
             action.timestamps.touch()
@@ -208,7 +165,37 @@ class JobManager:
             record.action = action.to_dict()
             record.updated_at = utc_now_iso()
             self._records[action.action_id] = record
+            # The terminal event is written into the restored log, so a client
+            # that reconnects sees the end of the story instead of a silent
+            # stream.
+            self._emit(
+                action,
+                JOB_ERROR,
+                action.error.message,
+                {"status": action.state, "error": action.error.to_dict()},
+            )
         self._persist()
+
+    def _events_from_store(self, job_id: str):
+        from .events import Event
+
+        for raw in self.store.events_for(job_id):
+            if not isinstance(raw, dict):
+                continue
+            try:
+                yield Event(
+                    job_id=raw.get("job_id", job_id),
+                    action_id=raw.get("action_id"),
+                    type=raw.get("type", "job.progress"),
+                    status=raw.get("status"),
+                    message=raw.get("message"),
+                    data=raw.get("data") or {},
+                    seq=int(raw.get("seq", 0)),
+                    event_id=raw.get("event_id", ""),
+                    ts=raw.get("ts", utc_now_iso()),
+                )
+            except (TypeError, ValueError):
+                continue
 
     # -- submission --------------------------------------------------------
     def submit(
@@ -218,16 +205,33 @@ class JobManager:
         *,
         session_id: Optional[str] = None,
         confirmation_token: Optional[str] = None,
+        idempotency_key: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Submit a tool request.
 
         Returns a payload with the action and, when approval is required and
         not yet granted, a :class:`ConfirmationRequest`.
+
+        ``idempotency_key`` makes the submission safe to retry: a repeated
+        request with the same key returns the *existing* job instead of
+        starting the work a second time. That is what stops a retried
+        request from applying the same file changes twice.
         """
         spec = self.registry.get(tool)
         self._assert_tool_usable(spec)
         if not isinstance(arguments, dict):
             raise SidekickError("invalid_request", "Tool arguments must be a JSON object.")
+
+        if idempotency_key:
+            existing_id = self._lookup_idempotent(session_id, idempotency_key)
+            if existing_id is not None:
+                existing = self._jobs.get(existing_id)
+                if existing is not None:
+                    return {
+                        "action": existing.to_dict(),
+                        "confirmation": None,
+                        "idempotent_replay": True,
+                    }
 
         action = Action(
             tool=tool,
@@ -269,6 +273,9 @@ class JobManager:
 
         if spec.approval_required and confirmation_token is not None:
             self.approvals.consume(action.action_id, arguments, confirmation_token)
+
+        if idempotency_key:
+            self._remember_idempotent(session_id, idempotency_key, action.action_id)
 
         self._start(action)
         self._persist()
@@ -500,7 +507,27 @@ class JobManager:
         return self.get(action_id)
 
     def shutdown(self, wait: bool = True) -> None:
+        # Ask every job that is still running to stop, so the process can
+        # exit instead of waiting for a command that never finishes.
+        with self._lock:
+            cancel_events = list(self._cancel_events.values())
+        for event in cancel_events:
+            event.set()
         self._executor.shutdown(wait=wait)
+        if self.store is not None:
+            # The final state is written before the process goes away.
+            self.store.close()
+
+    @property
+    def durable(self) -> bool:
+        """True when the job state and the event log survive a restart."""
+        return self.store is not None
+
+    @property
+    def store_path(self) -> Optional[str]:
+        if self.store is None:
+            return None
+        return str(self.store.path)
 
     # -- internals ---------------------------------------------------------
     def _transition(self, action: Action, new_state: str) -> None:
@@ -521,7 +548,7 @@ class JobManager:
         self._emit(action, JOB_STATUS, f"Job is {new_state}.", {"status": new_state})
 
     def _emit(self, action: Action, event_type: str, message: Optional[str], data: Dict[str, Any]) -> Event:
-        return self.events.publish(
+        event = self.events.publish(
             Event(
                 job_id=action.action_id,
                 action_id=action.action_id,
@@ -531,16 +558,76 @@ class JobManager:
                 data=data or {},
             )
         )
+        if self.store is not None:
+            # The event log is persisted, so a client that reconnects after a
+            # restart can resume from its last sequence number.
+            self.store.append_event(action.action_id, event.to_dict())
+        return event
 
     def _persist(self) -> None:
+        """Write the current job state to the durable store (if there is one)."""
         if self.store is None:
             return
         with self._lock:
-            records = list(self._records.values())
             for action_id, action in self._jobs.items():
                 record = self._records.get(action_id)
                 if record is None:
                     continue
                 record.action = action.to_dict()
                 record.updated_at = utc_now_iso()
-        self.store.save(records)
+                self.store.put_job(record)
+
+    # -- idempotency -------------------------------------------------------
+    @staticmethod
+    def _idem_key(session_id: Optional[str], key: str) -> str:
+        return f"{session_id or ''}\x00{key}"
+
+    def _lookup_idempotent(
+        self, session_id: Optional[str], key: str
+    ) -> Optional[str]:
+        """Return the job an idempotency key already produced, if any."""
+        composite = self._idem_key(session_id, key)
+        with self._lock:
+            job_id = self._idempotency.get(composite)
+            created = self._idempotency_times.get(composite)
+        if job_id is None and self.store is not None:
+            # A key that was recorded before a restart is still honoured.
+            job_id = self.store.lookup_idempotency(session_id, key)
+        if job_id is None:
+            return None
+        if created is not None and time.time() - created > self.idempotency_ttl:
+            with self._lock:
+                self._idempotency.pop(composite, None)
+                self._idempotency_times.pop(composite, None)
+            return None
+        with self._lock:
+            if job_id not in self._jobs:
+                return None
+        return job_id
+
+    def _remember_idempotent(
+        self, session_id: Optional[str], key: str, job_id: str
+    ) -> None:
+        composite = self._idem_key(session_id, key)
+        with self._lock:
+            self._idempotency[composite] = job_id
+            self._idempotency_times[composite] = time.time()
+        if self.store is not None:
+            self.store.put_idempotency(session_id, key, job_id)
+
+    # -- retention ---------------------------------------------------------
+    def prune(self, *, older_than_seconds: float = 3600.0) -> List[str]:
+        """Drop finished jobs and their events that are older than the TTL.
+
+        Returns the ids of the removed jobs. In-flight jobs are never
+        removed.
+        """
+        if self.store is None:
+            return []
+        removed = self.store.prune(older_than_seconds=older_than_seconds)
+        if removed:
+            self.events.prune(removed)
+            with self._lock:
+                for job_id in removed:
+                    self._records.pop(job_id, None)
+        return removed
