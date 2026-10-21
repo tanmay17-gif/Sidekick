@@ -118,7 +118,31 @@ CLI is provided. The service reports that state precisely
 the execution service must not depend on a package that is absent on a
 teammate's PC, so the default test command uses the standard library.
 
-## 6. Service-level prerequisites
+## 6. Real local capabilities discovered
+
+These were found by probing the machine with `ctypes` (no third-party
+packages) and are now exposed as real tools:
+
+| Capability | Real API | Status |
+|---|---|---|
+| System volume read/write | `waveOutGetVolume` / `waveOutSetVolume` (`winmm.dll`) | works; the master value is `0xFFFFFFFF` at 100% and must be masked to its 16-bit volume word |
+| Multimedia key presses | `user32.keybd_event` | works — drives whatever player the user actually has running |
+| System clipboard | `user32` / `kernel32` clipboard API | works (requires correct ctypes prototypes; a 32-bit default `restype` truncates the handle) |
+| Open with the default handler | `os.startfile` | works on Windows |
+| Audio devices | `waveOutGetNumDevs` | 1 device present |
+
+None of these need a provider account, which is why they are marked `REAL`
+rather than `NOT_CONFIGURED`. They are implemented in
+`sidekick_execution/adapters/system.py` and covered by
+`tests/test_system_capabilities.py`.
+
+**Caveat for Agent 3:** these are *local machine* capabilities. They control
+the machine Sidekick runs on. A music **provider** integration (Spotify,
+YouTube Music, …) would still need an account and an API key — none is
+configured — so this is genuine media control, not a streaming-service
+integration.
+
+## 7. Service-level prerequisites
 
 | Requirement | Status | Notes |
 |---|---|---|
@@ -128,7 +152,7 @@ teammate's PC, so the default test command uses the standard library.
 | Restart recovery | **Met** | `JobStore` persists job records; jobs that were running when the process stopped are recovered as `failed` with `job_interrupted` |
 | Secrets must not leak | **Met** | scrubbed child environment, secret redaction in captured output, tokens never included in public payloads |
 
-## 7. Blockers and open questions
+## 8. Blockers and open questions
 
 | # | Item | Impact | Smallest action that resolves it |
 |---|---|---|---|
@@ -138,7 +162,7 @@ teammate's PC, so the default test command uses the standard library.
 | B4 | `gh` CLI absent | PR/issue automation needs the REST API | The REST API works with the stored Git credential; `gh` is a convenience, not a requirement |
 | B5 | Alexa+ access unknown | Out of Agent 2's scope | Agent 4 is tracking this in `HACKATHON_REQUIREMENTS.md` |
 
-## 8. What this unblocks
+## 9. What this unblocks
 
 With this inventory settled, Agent 2 can implement the execution layer without
 guessing:

@@ -21,6 +21,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from .adapters.coding import CodingActionRequest, CodingAdapter
+from .adapters import system as system_adapter
 from .adapters.registry import (
     RISK_HIGH,
     RISK_LOW,
@@ -50,7 +51,12 @@ TOOL_CODING_EXECUTE = "coding.execute"
 TOOL_CODING_RUN_TESTS = "coding.run_tests"
 TOOL_WORKSPACE_INSPECT = "workspace.inspect"
 TOOL_VCS_DIFF = "vcs.diff"
+TOOL_VCS_COMMIT = "vcs.commit"
 TOOL_SYSTEM_INFO = "system.info"
+TOOL_SYSTEM_VOLUME = "system.volume"
+TOOL_SYSTEM_MEDIA_CONTROL = "system.media_control"
+TOOL_SYSTEM_CLIPBOARD = "system.clipboard"
+TOOL_SYSTEM_OPEN = "system.open"
 
 
 @dataclass
@@ -234,6 +240,91 @@ class ExecutionService:
                 status=STATUS_REAL,
             )
         )
+        self._register_system_tools()
+
+    def _register_system_tools(self) -> None:
+        """Register the real local operating-system capabilities."""
+        caps = system_adapter.capabilities()
+        available = caps.get("windows", False)
+
+        self.registry.register(
+            ToolSpec(
+                name=TOOL_SYSTEM_VOLUME,
+                description="Read or set the real master system volume (0-100).",
+                handler=self._handle_system_volume,
+                arguments_schema={
+                    "type": "object",
+                    "properties": {"level": {"type": "integer", "minimum": 0, "maximum": 100}},
+                },
+                risk_level=RISK_MEDIUM,
+                status=STATUS_REAL if caps.get("volume") else STATUS_NOT_CONFIGURED,
+                status_detail="" if caps.get("volume") else "The Windows audio API is unavailable.",
+            )
+        )
+        self.registry.register(
+            ToolSpec(
+                name=TOOL_SYSTEM_MEDIA_CONTROL,
+                description=(
+                    "Send a real multimedia key press (play_pause, next, previous, stop, "
+                    "mute, volume_up, volume_down) to the running media player."
+                ),
+                handler=self._handle_system_media_control,
+                arguments_schema={
+                    "type": "object",
+                    "required": ["action"],
+                    "properties": {"action": {"type": "string"}},
+                },
+                risk_level=RISK_LOW,
+                status=STATUS_REAL if caps.get("media_keys") else STATUS_NOT_CONFIGURED,
+                status_detail="" if caps.get("media_keys") else caps.get("reason", ""),
+            )
+        )
+        self.registry.register(
+            ToolSpec(
+                name=TOOL_SYSTEM_CLIPBOARD,
+                description="Read or write the real system clipboard.",
+                handler=self._handle_system_clipboard,
+                arguments_schema={
+                    "type": "object",
+                    "properties": {"text": {"type": "string"}},
+                },
+                risk_level=RISK_MEDIUM,
+                status=STATUS_REAL if caps.get("clipboard") else STATUS_NOT_CONFIGURED,
+                status_detail="" if caps.get("clipboard") else caps.get("reason", ""),
+            )
+        )
+        self.registry.register(
+            ToolSpec(
+                name=TOOL_SYSTEM_OPEN,
+                description="Open a file or URL with the operating system's default handler.",
+                handler=self._handle_system_open,
+                arguments_schema={
+                    "type": "object",
+                    "required": ["path"],
+                    "properties": {"path": {"type": "string"}},
+                },
+                risk_level=RISK_MEDIUM,
+                status=STATUS_REAL if caps.get("open_path") else STATUS_NOT_CONFIGURED,
+                status_detail="" if caps.get("open_path") else caps.get("reason", ""),
+            )
+        )
+        self.registry.register(
+            ToolSpec(
+                name=TOOL_VCS_COMMIT,
+                description="Create a real Git commit of the changes in an authorized workspace.",
+                handler=self._handle_vcs_commit,
+                arguments_schema={
+                    "type": "object",
+                    "required": ["workspace", "message"],
+                    "properties": {
+                        "workspace": {"type": "string"},
+                        "message": {"type": "string"},
+                    },
+                },
+                risk_level=RISK_MEDIUM,
+                status=STATUS_REAL,
+            )
+        )
 
     @staticmethod
     def _coding_status(status: ProviderStatus) -> tuple:
@@ -343,7 +434,81 @@ class ExecutionService:
             "container_runtime_available": any(
                 resolve_executable(name) for name in ("docker", "podman")
             ),
+            "system_capabilities": system_adapter.capabilities(),
             "sandbox_model": "process-level (allowlist, timeout, bounded output, workspace containment)",
+        }
+
+    # -- real local system capabilities -------------------------------------
+    def _handle_system_volume(self, arguments: Dict[str, Any], ctx: ToolContext) -> Dict[str, Any]:
+        level = arguments.get("level")
+        if level is None:
+            return {"level": system_adapter.get_volume(), "changed": False}
+        return {"level": system_adapter.set_volume(level), "changed": True}
+
+    def _handle_system_media_control(self, arguments: Dict[str, Any], ctx: ToolContext) -> Dict[str, Any]:
+        action = arguments.get("action")
+        if not isinstance(action, str) or not action.strip():
+            raise SidekickError("invalid_request", "A media 'action' is required.")
+        applied = system_adapter.send_media_key(action)
+        return {"action": applied, "delivered": True}
+
+    def _handle_system_clipboard(self, arguments: Dict[str, Any], ctx: ToolContext) -> Dict[str, Any]:
+        text = arguments.get("text")
+        if text is None:
+            return {"text": system_adapter.get_clipboard()}
+        if not isinstance(text, str):
+            raise SidekickError("invalid_request", "'text' must be a string.")
+        written = system_adapter.set_clipboard(text)
+        return {"characters": written, "written": True}
+
+    def _handle_system_open(self, arguments: Dict[str, Any], ctx: ToolContext) -> Dict[str, Any]:
+        path = arguments.get("path")
+        if not isinstance(path, str) or not path.strip():
+            raise SidekickError("invalid_request", "A 'path' is required.")
+        return {"opened": system_adapter.open_path(path)}
+
+    def _handle_vcs_commit(self, arguments: Dict[str, Any], ctx: ToolContext) -> Dict[str, Any]:
+        workspace_path = arguments.get("workspace")
+        if not isinstance(workspace_path, str) or not workspace_path.strip():
+            raise SidekickError("invalid_request", "A 'workspace' path is required.")
+        message = arguments.get("message")
+        if not isinstance(message, str) or not message.strip():
+            raise SidekickError("invalid_request", "A non-empty commit 'message' is required.")
+        workspace = self.workspace_policy.validate(workspace_path)
+        runner = CommandRunner(self.command_policy)
+
+        add = runner.run(["git", "add", "-A"], cwd=workspace.root, timeout=60)
+        if add.exit_code != 0:
+            raise SidekickError(
+                "vcs_error",
+                "Could not stage the workspace changes.",
+                details={"exit_code": add.exit_code, "stderr": add.stderr[-1000:]},
+            )
+        status = runner.run(["git", "status", "--porcelain=v1"], cwd=workspace.root, timeout=60)
+        if status.exit_code == 0 and not status.stdout.strip():
+            return {
+                "committed": False,
+                "reason": "no_changes",
+                "head_sha": GitWorkspace(workspace.root, runner).head_sha(),
+            }
+        # The message goes in on stdin so that its text is never part of the
+        # command line (and can never be mistaken for a command).
+        commit = runner.run(
+            ["git", "commit", "-F", "-"],
+            cwd=workspace.root,
+            timeout=120,
+            stdin_data=message,
+        )
+        if commit.exit_code != 0:
+            raise SidekickError(
+                "vcs_error",
+                "The commit failed.",
+                details={"exit_code": commit.exit_code, "stderr": commit.stderr[-1000:]},
+            )
+        return {
+            "committed": True,
+            "head_sha": GitWorkspace(workspace.root, runner).head_sha(),
+            "message": message,
         }
 
     # -- reporting ---------------------------------------------------------

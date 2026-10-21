@@ -325,7 +325,12 @@ status is `NOT_CONFIGURED` must not be offered as a working button.
 | `coding.run_tests` | `REAL` | no | low |
 | `workspace.inspect` | `REAL` | no | low |
 | `vcs.diff` | `REAL` | no | low |
+| `vcs.commit` | `REAL` | no (per-call `approval_required` supported) | medium |
 | `system.info` | `REAL` | no | low |
+| `system.volume` | `REAL` on Windows, else `NOT_CONFIGURED` | no | medium |
+| `system.media_control` | `REAL` on Windows, else `NOT_CONFIGURED` | no | low |
+| `system.clipboard` | `REAL` on Windows, else `NOT_CONFIGURED` | no | medium |
+| `system.open` | `REAL` on Windows, else `NOT_CONFIGURED` | no | medium |
 
 `coding.execute` arguments:
 
@@ -340,6 +345,26 @@ status is `NOT_CONFIGURED` must not be offered as a working button.
   "test_timeout_seconds": 300
 }
 ```
+
+### 7.1 Real local operating-system capabilities
+
+`system.volume`, `system.media_control` and `system.clipboard` call **real
+Windows APIs** through `ctypes` — no third-party packages, no simulated
+provider:
+
+| Tool | Real API used | Behaviour |
+|---|---|---|
+| `system.volume` | `waveOutGetVolume` / `waveOutSetVolume` (`winmm.dll`) | reads/sets the master system volume, `{"level": 0-100}`; reading returns `{"level": N, "changed": false}` |
+| `system.media_control` | `user32.keybd_event` | sends a real multimedia key press: `play_pause`, `next`, `previous`, `stop`, `mute`, `volume_up`, `volume_down`. This drives **whatever player the user actually has running** — it is the honest way to do music control without a music-provider account. |
+| `system.clipboard` | `user32` / `kernel32` clipboard API | reads or writes real clipboard text |
+| `system.open` | `os.startfile` | opens a file or URL with the OS default handler |
+| `vcs.commit` | `git add -A` + `git commit -F -` | creates a **real** commit; the message is passed on stdin so its text can never be mistaken for a command. Reports `{"committed": false, "reason": "no_changes"}` when there is nothing to commit. |
+
+On a non-Windows host these report `NOT_CONFIGURED` with a reason and the
+tool call returns `not_implemented` — they never pretend to work.
+
+`system.info` reports which of these are actually usable on the machine, so
+the UI can reflect reality.
 
 ## 8. MCP surface
 
