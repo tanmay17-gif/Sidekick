@@ -24,6 +24,8 @@ A task is not `MERGED` until the real merge commit exists on the remote base. A 
 | A1-COMPAT | 2 | Cross-agent contract verification + live action event streaming | Agent 1 | MERGED | A1-CONTRACT | `scripts/check_contract_compat.py` verifies the core against the contract files on the Agent 2 and Agent 3 branches; `GET /api/v1/actions/{id}/events` streams an action's events live. Merged in #9 |
 | A1-REALITY | 3 | Capability reality audit + the fixes it found | Agent 1 | IN_REVIEW | A1-BRAIN | `docs/CAPABILITY_REALITY_AUDIT.md` and `docs/DECISION_FAILURES.md`; the model may no longer name a capability the utterance does not mention; `web.search` and `reminder.set` added; capability discovery; honest unsupported answers; client-capability declaration; no test may open a browser. PR #13 open (`agent1/capability-reality`) |
 | A1-HARDEN | 3 | Packaging, routing hardening, client trust boundary | Agent 1 | IN_REVIEW | A1-REALITY | The distribution contains both packages and both entry points (checked by building a wheel); the routing survives paraphrases, typos, corrections and context follow-ups; a client capability cannot be completed by the server, cannot hang forever and is never announced as done. PR #13 |
+| A1-DEVFLOW | 3 | Voice-first developer flow + the union with the execution service | Agent 1 | IN_REVIEW | A1-HARDEN | "Fix the failing tests in my project" routes to `coding.execute`, gets the workspace from the session (or `SIDEKICK_PROJECT_DIR`), asks for the approval bound to the `plan_hash`, follows the real progress and cancels the right job. The core branch is a superset of PR #4's changes, so the merge resolves by taking this side. PR #13 |
+| A1-CODECRED | 4 | A live coding provider | **human** | BLOCKED | A1-DEVFLOW | `SIDEKICK_LLM_API_KEY` (a remote OpenAI-compatible endpoint, so nothing is installed on the user's machine) or an authorized coding CLI. The acceptance test is `python scripts/live_provider_acceptance.py`: exit 0 = a live provider fixed a real bug and the real test command passed; exit 2 = blocked. No agent can create a credential. |
 | A1-COVERAGE | 3 | Coding capability in `main` + the execution provider credential | Agent 2 | READY | A1-REALITY | `coding.execute` reaches `main` from `agent2/core-integration`; the *provider* still needs `SIDEKICK_LLM_API_KEY` or a coding CLI, otherwise the capability is `NOT_CONFIGURED` |
 | A2-AUDIT | 0 | Read-only execution/integration prerequisites inventory | Agent 2 | MERGED | — | `docs/execution-prerequisites-audit.md` (PR #4) |
 | A3-AUDIT | 0 | Read-only UI/voice/media prerequisites inventory | Agent 3 | MERGED | — | `web/docs/PREREQUISITES.md` (PR #1) |
@@ -36,19 +38,32 @@ A task is not `MERGED` until the real merge commit exists on the remote base. A 
 ## Next task
 
 PR #13 (Agent 1) - the capability reality audit, the routing hardening, the
-packaging check and the client trust boundary. It is open and green:
-`python -m pytest` -> 188 passed, 7 skipped; `python scripts/verify_backend.py`
--> 20/20 against a real uvicorn server with the real model;
-`python scripts/check_contract_compat.py` -> OK (11 checks);
-`python scripts/check_packaging.py --build` -> OK (a real wheel).
+packaging check, the client trust boundary and the voice-first developer flow.
+It is open and green:
+
+- `python -m pytest` -> 198 passed, 7 skipped
+- `python scripts/verify_backend.py` -> 20/20 against a real uvicorn server
+  with the real model
+- `python scripts/check_contract_compat.py` -> OK (11 checks)
+- `python scripts/check_packaging.py --build` -> OK (a real wheel)
+
 It needs the merge gate, not more work from me.
 
-After it merges: **A1-COVERAGE** - Agent 2's `coding.execute` reaching `main`
-**plus** the provider credential that is still missing. That credential is a
-human decision (an LLM API key or a coding CLI); no agent can create it.
+**Merge order:** PR #13 first, then PR #4. The conflict between them resolves
+by taking PR #13's side - it already contains PR #4's behaviour (the execution
+adapter registration and the adapter's own `capability_status()`).
+
+**After that:** A1-CODECRED, which is blocked on a human. Set
+`SIDEKICK_LLM_API_KEY` for a remote OpenAI-compatible endpoint (nothing is
+installed on the user's machine) or install an authorized coding CLI. The
+acceptance test is Agent 2's `python scripts/live_provider_acceptance.py`:
+exit `0` means a live provider fixed a real bug and the project's real test
+command passed; exit `2` means blocked.
 
 Not started, and deliberately so: durable session storage (a restart still
-loses the conversation) and a notification channel for the reminders.
+loses the conversation), a notification channel for the reminders, and the
+travel / food / Alexa+ / AWS work - each needs a provider, an account or a
+policy that does not exist yet.
 
 ## Open integration questions (asked, with the request in the PR)
 

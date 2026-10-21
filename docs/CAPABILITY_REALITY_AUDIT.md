@@ -194,7 +194,46 @@ Named here so that no demo claims them:
 
 ---
 
-## 5. The gaps that matter, in order
+## 5. The developer path: what is real, what is blocked
+
+The voice-first developer experience is the product's most valuable path, so
+it is worth being exact about what exists.
+
+| Piece | State | Evidence |
+|---|---|---|
+| the core routes a developer request to `coding.execute`, supplies the workspace, asks for the approval, follows the real progress and cancels the right task | **REAL_AND_VERIFIED** | `tests/test_developer_flow.py` (9 tests against a stand-in adapter with the same shape) |
+| the execution service: workspace authorisation, command sandbox, real edits, real `git diff`, the real test exit code, job lifecycle, idempotency, event resume, cancellation | **REAL_AND_VERIFIED** | Agent 2: `docs/EXECUTION_READINESS.md`, 161 tests on their branch |
+| the core ↔ execution service boundary (HTTP + JSON + SSE) and the **MCP** transport (JSON-RPC 2.0 over stdio, `tools/list` + `tools/call` over the same service) | **REAL_AND_VERIFIED** | Agent 2: `sidekick_execution/mcp_server.py`, `tests/test_transports.py` |
+| the **remote/cloud agent** path: an OpenAI-compatible endpoint (`SIDEKICK_LLM_API_KEY`, `SIDEKICK_LLM_BASE_URL`, `SIDEKICK_LLM_MODEL`) - the user installs nothing on their machine | **REAL_BUT_UNVERIFIED** - the code is real and validated, but it has never been pointed at a real model, because no key exists | Agent 2: `sidekick_execution/providers/http_api.py` |
+| the local coding CLI path | **NOT_CONFIGURED** | no `claude`, `codex`, `aider`, `cursor-agent`, `copilot`, `gemini` or `ollama` on any machine |
+| the provider behind `coding.execute` in this deployment | **NOT_CONFIGURED** - the capability report says so, and the browser renders it as `unconfigured` | `GET /api/v1/capabilities` |
+
+### The live acceptance test
+
+Agent 2's script is the acceptance test for this path, and it never substitutes a fixture:
+
+```
+python scripts/live_provider_acceptance.py
+```
+
+| Exit code | Meaning |
+|---|---|
+| `0` | a **live** provider fixed the bug and the project's real test command passed |
+| `1` | a live provider ran but the result was not correct |
+| `2` | **BLOCKED** - no live provider is configured |
+
+Right now it exits `2`. The one thing that changes that is a credential
+(`SIDEKICK_LLM_API_KEY` for a remote OpenAI-compatible endpoint, or an
+authorized coding CLI). It is a human decision, not a code change.
+
+**The MCP surface is an MCP *host* surface for the execution service**: an MCP
+client can list and call the execution tools over stdio, and the same service
+is reachable over HTTP for the core. It is not a bridge to a third-party coding
+agent's MCP server - the remote agent is reached over HTTP by the provider.
+
+---
+
+## 6. The gaps that matter, in order
 
 1. **The model was confidently wrong and the product believed it.** Fixed in this branch: the
    decision model may no longer name a capability the utterance does not mention
