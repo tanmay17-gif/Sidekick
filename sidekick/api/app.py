@@ -44,8 +44,8 @@ SESSION_HEADER_ALIAS = "X-Sidekick-Session"
 _CAPABILITY_STATES = ("live", "simulated", "unavailable", "unconfigured", "disconnected")
 
 
-def create_app(engine: DecisionEngine | None = None) -> FastAPI:
-    """Build the application. A pre-built engine can be injected by tests."""
+def create_app(engine: DecisionEngine | None = None, alexa_verifier: Any = None) -> FastAPI:
+    """Build the application. Pre-built engine or verifier can be injected by tests."""
     engine = engine or build_engine()
 
     app = FastAPI(
@@ -379,12 +379,27 @@ def create_app(engine: DecisionEngine | None = None) -> FastAPI:
         return {"action": action.model_dump(mode="json")}
 
     from .alexa import AlexaAdapter
+    from .alexa_verifier import AlexaRequestVerifier, AlexaSecurityError
     alexa_adapter = AlexaAdapter(engine)
+    verifier = alexa_verifier or AlexaRequestVerifier()
+    app.state.alexa_verifier = verifier
+    app.state.alexa_adapter = alexa_adapter
 
     @app.post("/api/v1/alexa")
     @app.post("/v1/alexa")
-    async def alexa_request(payload: dict[str, Any] = Body(...)) -> dict[str, Any]:
-        """Alexa Skills Kit (ASK) HTTP interface for voice interaction."""
+    async def alexa_request(request: Request) -> Any:
+        """Alexa Skills Kit (ASK) HTTP interface with signature and timestamp verification."""
+        raw_body = await request.body()
+        try:
+            payload = json.loads(raw_body.decode("utf-8") or "{}")
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail="Malformed JSON payload") from exc
+
+        try:
+            verifier.verify_request(request.headers, raw_body, payload)
+        except AlexaSecurityError as exc:
+            raise HTTPException(status_code=exc.status_code, detail=exc.message)
+
         return alexa_adapter.handle(payload)
 
     @app.get("/")

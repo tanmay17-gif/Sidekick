@@ -24,15 +24,13 @@ Sidekick is a voice-first intelligent assistant that:
 | **Local path** | `C:\Users\Mrunal Amkar\OneDrive\Documents\Sidekick` |
 | **Active branch** | `integrated-sidekick` |
 | **Remote** | `origin` → `https://github.com/tanmay17-gif/Sidekick` |
-| **Remote sync** | Branch does NOT exist on GitHub yet (local-only until pushed) |
-| **Base commit** | `3309392` (feat: complete branch integration, Bedrock decision model, Alexa adapter, and hackathon documentation) |
+| **Remote sync** | Pushed to GitHub (`refs/heads/integrated-sidekick`) |
+| **Base commit** | `d0cf516` (remediation commit tracks latest verified work) |
 
-### Branches on Origin (before this session's push)
-- `main` — original project base
-- `agent1/capability-reality`, `agent1/bootstrap-protocol`, `agent1/contract-compat`, `agent1/core-brain-v1`, `agent1/correction-semantics`, `agent1/project-config`, `agent1/voice-summary`
-- `agent2/core-integration`, `agent2/execution-foundation`
-- `agent3/voice-experience`
-- `integrated-sidekick` — **not yet on remote**
+### Branches on Origin
+- `main` — base trunk
+- `integrated-sidekick` — active integration branch containing all unified work (supersedes PRs #1, #4, and #13)
+- Older PR branches: `agent1/capability-reality` (PR #13), `agent2/core-integration` (PR #4), `agent3/voice-experience` (PR #1) — preserved for history but superseded by `integrated-sidekick`
 
 ---
 
@@ -225,16 +223,16 @@ python -m sidekick_execution mcp
 
 | Command | Passed | Failed | Skipped | Status |
 |---|---|---|---|---|
-| `python -m pytest` | 375 | 0 | 7 | ✅ PASS |
-| `python scripts/check_contract_compat.py` | 11 checks | 0 | — | ✅ PASS |
-| `python scripts/check_packaging.py` | OK | — | — | ✅ PASS |
-| `python scripts/verify_backend.py --port 8072` | 20 | 0 | — | ✅ PASS |
+| `python -m pytest` | 382 | 0 | 7 | ✅ PASS |
+| `python scripts/check_packaging.py --build` | OK | — | — | ✅ PASS |
+| `python -m pytest tests/test_core_contract.py tests/test_contract_compat.py tests/test_execution_contract.py -v` | All passed | 0 | — | ✅ PASS |
 | `cd web && npm run lint` | 0 errors | — | — | ✅ PASS |
 | `cd web && npm run typecheck` | 0 errors | — | — | ✅ PASS |
 | `cd web && npm run test` | 162 | 0 | — | ✅ PASS |
+| `cd web && npm run test:e2e` | 27 | 0 | — | ✅ PASS |
 | `cd web && npm run build` | Built successfully | — | — | ✅ PASS |
 
-**All checks green. 375 Python tests + 162 frontend tests = 537 automated tests passing.**
+**All checks green. 382 Python tests + 162 Vitest tests + 27 Playwright E2E tests = 571 automated tests passing.**
 
 ---
 
@@ -256,6 +254,9 @@ The system was implicitly requiring `SIDEKICK_LLM_API_KEY` for the coding execut
 5. **Updated `sidekick/bootstrap.py`** — `build_decision_model()` now probes Bedrock in `auto` mode (falls through to Laya if no AWS creds), and `bedrock` choice is clean without the conditional BEDROCK_MODEL_ID hack.
 6. **Updated `tests/test_provider_config.py`** — `SUPPORTED_PROVIDERS` assertion updated to include `bedrock`.
 7. **Created `tests/test_bedrock_provider.py`** — Tests for missing creds, mock client, successful plan, and explicit selection.
+8. **Updated `pyproject.toml` & packaging** — Added `aws = ["boto3>=1.34", "ask-sdk-core>=1.19", "ask-sdk-webservice-support>=1.3", "cryptography>=42.0"]` extra and verified clean editable installation.
+9. **Implemented Alexa Security Verification** — Added `sidekick/api/alexa_verifier.py` implementing ASK request signature, cert URL, and timestamp validation with 13 tests.
+10. **Created CI Quality Gate** — Added `.github/workflows/quality.yml` covering Python packaging, contract checks, test suites, frontend lint, typecheck, Vitest, build, and Playwright E2E.
 
 ### Verified Behavior Without Any Key
 ```
@@ -282,20 +283,21 @@ $ python -m uvicorn sidekick.api.app:create_app --factory --host 127.0.0.1 --por
 | Approval gates + plan_hash | `tests/test_engine.py` | ✅ DONE |
 | Session management | `tests/test_sessions.py` | ✅ DONE |
 | Decision engine fallback chain | `tests/test_engine.py` | ✅ DONE |
-| AWS Bedrock decision model | `tests/test_bedrock_model.py` (mocked) | ✅ DONE (live needs AWS creds) |
-| AWS Bedrock coding provider | `tests/test_bedrock_provider.py` (mocked) | ✅ DONE (live needs AWS creds) |
-| Alexa Skills Kit adapter | `tests/test_alexa.py` (6 tests) | ✅ DONE (registration needs Amazon Dev Console) |
+| AWS Bedrock decision model | `tests/test_bedrock_model.py` (mocked in CI) | ✅ DONE (live needs AWS creds) |
+| AWS Bedrock coding provider | `tests/test_bedrock_provider.py` (mocked in CI) | ✅ DONE (live needs AWS creds) |
+| Alexa Skills Kit adapter & security | `tests/test_alexa.py`, `tests/test_alexa_security.py` (13 tests) | ✅ DONE (live Echo needs Dev Console registration) |
 | MCP stdio server | `tests/test_transports.py` | ✅ DONE |
 | Coding execution service | `tests/test_coding_end_to_end.py` | ✅ DONE |
 | Workspace safety + sandboxing | `tests/test_workspace_safety.py` | ✅ DONE |
-| React/Vite/TS frontend | 162 tests passing, production build | ✅ DONE |
+| React/Vite/TS frontend | 162 unit tests passing, production build | ✅ DONE |
 | Voice I/O (Web Speech API) | `tests/unit/speech.test.ts` | ✅ DONE |
 | Movie Buddy companion | `tests/unit/movie-buddy.test.tsx` (11 tests) | ✅ DONE |
+| Browser E2E Tests | `web/tests/e2e/app.spec.ts` (27 tests) | ✅ DONE (Playwright Chromium) |
 | Client capability execution | `tests/unit/app.test.tsx`, verify_backend | ✅ DONE |
 | SSE event streaming | `tests/test_streaming.py` | ✅ DONE |
 | OpenAI-compatible HTTP coding provider | `tests/test_provider_config.py` | ✅ DONE |
 | Local CLI coding provider | `tests/test_providers.py` | ✅ DONE |
-| Contract compatibility | `scripts/check_contract_compat.py` (11 checks) | ✅ DONE |
+| Contract compatibility | `scripts/check_contract_compat.py` & contract tests | ✅ DONE |
 
 ---
 
@@ -303,14 +305,13 @@ $ python -m uvicorn sidekick.api.app:create_app --factory --host 127.0.0.1 --por
 
 | Feature | Status | Blocker |
 |---|---|---|
-| Live AWS Bedrock inference (decision) | PARTIAL | Needs `AWS_ACCESS_KEY_ID` / IAM role |
-| Live AWS Bedrock coding | PARTIAL | Needs AWS credentials + `SIDEKICK_PROVIDER=bedrock` |
-| Live Alexa Echo invocation | PARTIAL | Needs Amazon Developer Console skill registration + `ALEXA_SKILL_ID` |
-| Live remote LLM coding | PARTIAL | Needs `SIDEKICK_LLM_API_KEY` + compatible endpoint |
-| Live local CLI coding (claude/cursor) | PARTIAL | Needs CLI installed + `SIDEKICK_CODING_CLI` |
-| Movie Buddy commentary model | PARTIAL | Heuristic local engine works; model endpoint is optional |
-| Production Alexa deployment | BLOCKED | Needs HTTPS endpoint, Amazon Developer account, Echo hardware |
-| Playwright E2E tests | BLOCKED | Requires running server + browser; skipped in CI |
+| Live AWS Bedrock inference (decision) | UNVERIFIED LIVE | Needs `AWS_ACCESS_KEY_ID` / IAM role (mocked in tests) |
+| Live AWS Bedrock coding | UNVERIFIED LIVE | Needs AWS credentials + `SIDEKICK_PROVIDER=bedrock` (mocked in tests) |
+| Live Alexa Echo hardware invocation | UNVERIFIED LIVE | Needs Amazon Developer Console skill registration + `ALEXA_SKILL_ID` |
+| Live remote LLM coding | UNVERIFIED LIVE | Needs `SIDEKICK_LLM_API_KEY` + compatible endpoint |
+| Live local CLI coding (claude/cursor) | UNVERIFIED LIVE | Needs CLI installed + `SIDEKICK_CODING_CLI` |
+| Movie Buddy commentary model | OPTIONAL | Heuristic local engine works; model endpoint is optional |
+| Production Alexa deployment | REQUIRES CLOUD DEPLOY | Needs public HTTPS endpoint, Amazon Developer account, Echo hardware |
 
 ---
 
@@ -365,16 +366,19 @@ Standard Alexa Skills Kit JSON format. Returns compliant ASK response with SSML 
 | Coding provider only offered HTTP API without key | Added Bedrock provider (AWS-auth) | `sidekick_execution/providers/bedrock.py` |
 | `select_provider("auto")` didn't try Bedrock first | Updated candidate list order | `sidekick_execution/service.py` |
 | Error message only mentioned `SIDEKICK_LLM_API_KEY` | Updated to list all 3 provider options | `sidekick_execution/service.py` |
+| Packaging `pyproject.toml` missing `aws` extra for `boto3` | Added `aws` extra with `boto3`, `ask-sdk-core`, `ask-sdk-webservice-support`, `cryptography` | `pyproject.toml`, `scripts/check_packaging.py` |
+| Alexa endpoint lacked ASK signature and timestamp verification | Implemented ASK cryptographic verifier & regression tests | `sidekick/api/alexa_verifier.py`, `sidekick/api/app.py`, `tests/test_alexa_security.py` |
+| Repository lacked unified GitHub Actions quality gate | Added comprehensive repository workflow | `.github/workflows/quality.yml` |
 
 ---
 
 ## 15. Outstanding Risks and Next Steps (Priority Order)
 
-1. **PUSH `integrated-sidekick` to GitHub** — All tests pass locally; branch is not yet on remote.
-2. **AWS credentials** — Set `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_REGION` to activate live Bedrock inference and coding provider. No code changes needed.
-3. **Alexa skill registration** — Register skill in Amazon Developer Console, get Skill ID, set `ALEXA_SKILL_ID`, deploy to HTTPS endpoint.
-4. **Laya CPU latency** — First inference on CPU takes ~28s. Pre-loading (`LAYA_PRELOAD=1`) or GPU acceleration would improve demo responsiveness.
-5. **Movie Buddy laya tool accuracy** — Control intents (pause, resume, cancel) had 42% tool accuracy with Laya; the deterministic rule fallback corrects to 83%. No code fix needed, but flagging for awareness.
+1. **Push remediation to `integrated-sidekick`** — Push latest remediation commits and monitor the `.github/workflows/quality.yml` GitHub Actions run.
+2. **Open Pull Request from `integrated-sidekick` to `main`** — Record older PRs #1, #4, and #13 as superseded by `integrated-sidekick`.
+3. **AWS credentials configuration** — Set `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_REGION` if live Bedrock inference or coding provider testing is desired.
+4. **Alexa skill registration** — Register skill in Amazon Developer Console with `ALEXA_SKILL_ID` when deploying to production with public HTTPS endpoint.
+5. **Laya CPU latency** — First inference on CPU takes ~25s. Pre-loading (`LAYA_PRELOAD=1`) or GPU acceleration would improve demo responsiveness.
 
 ---
 

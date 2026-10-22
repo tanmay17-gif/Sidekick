@@ -48,7 +48,7 @@ REQUIRED_SCRIPTS = {
 REQUIRED_DEPENDENCIES = ("fastapi", "uvicorn", "pydantic")
 
 #: The extras the project publishes.
-REQUIRED_EXTRAS = ("laya", "dev")
+REQUIRED_EXTRAS = ("laya", "dev", "aws")
 
 #: A stand-in for the execution service, used when it is not in the tree.
 SYNTHETIC_EXECUTION_PACKAGE = {

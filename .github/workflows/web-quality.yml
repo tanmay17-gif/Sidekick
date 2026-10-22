@@ -6,7 +6,7 @@ name: web-quality
 
 on:
   push:
-    branches: [main, 'agent3/**']
+    branches: [main, 'agent3/**', integrated-sidekick]
     paths:
       - 'web/**'
       - '.github/workflows/web-quality.yml'

@@ -26,6 +26,13 @@ dependencies = [
 # Real decision model. Heavy (torch + ~800MB checkpoint) and optional on purpose:
 # the core must stay testable without model weights or network access.
 laya = ["laya>=0.4", "torch>=2.0"]
+# AWS Bedrock decision model, boto3 runtime, and Alexa request verification extras.
+aws = [
+    "boto3>=1.34",
+    "ask-sdk-core>=1.19",
+    "ask-sdk-webservice-support>=1.3",
+    "cryptography>=42.0",
+]
 dev = ["pytest>=8.0", "httpx>=0.27"]
 
 [project.scripts]

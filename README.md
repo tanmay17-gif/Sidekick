@@ -58,10 +58,10 @@ Sidekick understands what you *mean*, not just what you said: it resolves the fi
 
 | Capability / Feature | Status | Verification Evidence |
 |---|---|---|
-| **Voice Interface (Speech-to-Text & TTS)** | REAL | Web Speech API in `web/src/lib/voice/*`; 162 Vitest tests pass. |
-| **Alexa Skills Kit Integration** | REAL | `/api/v1/alexa` endpoint handles Launch, Intent, Stop; verified in `tests/test_alexa.py`. |
+| **Voice Interface (Speech-to-Text & TTS)** | REAL | Web Speech API in `web/src/lib/voice/*`; 162 Vitest tests and 27 Playwright E2E tests pass. |
+| **Alexa Skills Kit Integration** | VERIFIED CODE | `/api/v1/alexa` endpoint with ASK signature/cert verification, timestamp validation, and intent execution in `tests/test_alexa.py` & `tests/test_alexa_security.py` (live AWS skill deployment requires Amazon Developer Console config). |
 | **Model Context Protocol (MCP) Server** | REAL | Stdio JSON-RPC 2.0 MCP server (`python -m sidekick_execution mcp`) verified in `tests/test_transports.py`. |
-| **Amazon Bedrock Decision Adapter** | REAL | `BedrockDecisionModel` with Claude/Titan support and deterministic fallback in `tests/test_bedrock_model.py`. |
+| **Amazon Bedrock Decision Adapter** | VERIFIED CODE | `BedrockDecisionModel` with Converse API, Claude/Titan, automated region fallback, and deterministic fallback in `tests/test_bedrock_model.py` (mocked in CI; live AWS calls require configured credentials). |
 | **Self-Hosted ML Decision Model** | REAL | `convaiinnovations/laya` supported with timeout protection and lazy load in `tests/test_laya_integration.py`. |
 | **Deterministic Intent Routing** | REAL | 35 intent tests in `tests/test_intent_routing.py` passing. |
 | **Sandboxed Execution & Workspace Safety** | REAL | Path escape, shell injection blocked in `tests/test_workspace_safety.py`. |
@@ -105,26 +105,27 @@ Open **`http://127.0.0.1:8000`** in your browser.
 ---
 
 ## Running the Verification Suites
-
-### Python Backend Suite (370+ Tests)
+ 
+### Python Backend Suite (389 Tests: 382 passed, 7 skipped)
 ```bash
 python -m pytest
 ```
 
-### Contract Compatibility Check
-```bash
-python scripts/check_contract_compat.py
-```
-
 ### Packaging & Wheel Inspection
 ```bash
-python scripts/check_packaging.py
+python scripts/check_packaging.py --build
 ```
 
-### Web Frontend Suite (Typecheck, Lint, Vitest)
+### Contract Conformance Checks
+```bash
+python -m pytest tests/test_core_contract.py tests/test_contract_compat.py tests/test_execution_contract.py -v
+```
+
+### Web Frontend Suite (Typecheck, Lint, Vitest & Playwright E2E)
 ```bash
 cd web
 npm run verify
+npm run test:e2e
 ```
 
 ---

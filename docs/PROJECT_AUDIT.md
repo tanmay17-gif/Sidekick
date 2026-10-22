@@ -91,9 +91,9 @@ We have now consolidated all three branches into a single unified working branch
 | **Voice Synthesis (TTS)** | `web/src/lib/voice/synthesis.ts` | REAL | **Verified working** | SpeechSynthesis integration with tone and spoken-summary binding. |
 | **Movie Buddy (Caption Engine)** | `web/src/lib/movie/engine.ts`, `MovieBuddy.tsx` | REAL | **Verified working** | `tests/unit/movie-engine.test.ts` (32 tests) & `movie-buddy.test.tsx` pass. |
 | **Local Games (Chess, 2048, TicTacToe)** | `web/src/lib/games/*` | REAL | **Verified working** | Unit tests pass in `tests/unit/games.test.ts`. |
-| **Client Capability Completion Endpoint** | `sidekick/api/app.py`, `web/src/lib/api/client.ts` | REAL | **Partially working / In progress** | Contract defined; needs `POST /api/v1/actions/{id}/complete` endpoint wired to engine. |
-| **AWS Bedrock Decision Adapter** | `sidekick/core/decisions/bedrock_model.py` | REAL | **Implemented / Testing** | Adapter for Amazon Bedrock Claude / Titan models with offline fallback. |
-| **Alexa Skill Integration Handler** | `sidekick/api/alexa.py` | REAL | **Implemented / Testing** | Standard Alexa Skills Kit request handler mapped directly to `DecisionEngine`. |
+| **Client Capability Completion Endpoint** | `sidekick/api/app.py`, `web/src/lib/api/client.ts` | REAL | **Verified working** | `POST /api/v1/actions/{id}/complete` wired in backend and frontend client; verified in tests. |
+| **AWS Bedrock Decision Adapter** | `sidekick/core/decisions/bedrock_model.py` | REAL | **Verified working (Unit & Mocked)** | Boto3 Converse API, Claude/Titan, region fallback, and deterministic fallback in `test_bedrock_model.py`. Live calls unverified without AWS keys. |
+| **Alexa Skill Integration & Security** | `sidekick/api/alexa.py`, `alexa_verifier.py` | REAL | **Verified working (Code & Security)** | Standard ASK adapter with signature verification, cert URL check, and 150s timestamp validation in `test_alexa.py` and `test_alexa_security.py`. |
 
 ---
 
@@ -101,16 +101,17 @@ We have now consolidated all three branches into a single unified working branch
 
 ### 4.1 Python Test Suite
 - **Command:** `python -m pytest`
-- **Output:** `359 passed, 7 skipped in 60.95s`
+- **Output:** `382 passed, 7 skipped` (out of 389 collected tests).
 - **Zero test failures** across all modules.
-- **Contract verification:** `python scripts/check_contract_compat.py` -> `OK (11 checks)`
-- **Packaging verification:** `python scripts/check_packaging.py` -> `packaging: OK (configuration)`
+- **Contract verification:** `python -m pytest tests/test_core_contract.py tests/test_contract_compat.py tests/test_execution_contract.py -v` -> All passed.
+- **Packaging verification:** `python scripts/check_packaging.py --build` -> `packaging: OK (configuration and wheel contents)`
 
 ### 4.2 Web Frontend Suite
 - **Typecheck:** `npm run typecheck` in `web/` -> **0 errors** (Clean).
 - **Linter:** `npm run lint` in `web/` -> **0 errors** (Clean).
 - **Unit & Component Tests:** `npm run test` in `web/` -> **162 passed across 12 test files**.
-- **Production Build:** `npm run build` in `web/` -> Built in 1.15s, generated `web/dist/`.
+- **Browser E2E Tests:** `npm run test:e2e` in `web/` -> **27 passed in Playwright Chromium**.
+- **Production Build:** `npm run build` in `web/` -> Built in 1.35s, generated `web/dist/`.
 
 ---
 
@@ -121,18 +122,18 @@ We have now consolidated all three branches into a single unified working branch
    - Without it, the execution engine honestly reports `NOT_CONFIGURED`, executes simulated double in development, or executes local CLI if configured.
 2. **AWS Bedrock Credentials:**
    - Requires `AWS_REGION` and AWS credentials (`AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` or IAM role/profile).
-   - If unconfigured, the system gracefully falls back to the local `LayaDecisionModel` or `RuleDecisionModel`.
+   - If unconfigured, the system gracefully falls back to the local `LayaDecisionModel` or `RuleDecisionModel`. Live cloud calls are unverified in this environment due to absence of AWS credentials.
 3. **Live Alexa Skill Deployment:**
    - Native Alexa skill invocation requires registration in the Amazon Developer Console with `ALEXA_SKILL_ID`.
-   - The repository provides the verified HTTP skill handler and mock test fixtures that prove Alexa JSON input/output compatibility without paid cloud dependencies.
+   - The repository provides the verified HTTP skill handler, cryptographic signature verifier, and mock test fixtures that prove Alexa JSON input/output compatibility.
 
 ---
 
-## 6. Prioritized Implementation Backlog
+## 6. Implementation Status
 
-- **P0 [COMPLETED]:** Repository stabilization, 3-way branch integration, dependency resolution (`httpx`, `laya`, `torch`, `boto3`, npm packages), and test suite alignment.
-- **P1 [IN PROGRESS]:** Core-to-Client capability completion: Wire `POST /api/v1/actions/{id}/complete` in backend and client.
-- **P2 [IN PROGRESS]:** AWS Bedrock Decision Engine adapter with fallback and configuration validation.
-- **P3 [IN PROGRESS]:** Alexa Skill endpoint and request adapter mapped to Sidekick intent routing.
-- **P4 [UPCOMING]:** Movie Buddy UI/UX enhancements and client capability execution integration.
-- **P5 [UPCOMING]:** End-to-end integration testing, hackathon compliance documentation (`docs/HACKATHON_COMPLIANCE.md`), and demo script rehearsal.
+- **P0 [COMPLETED]:** Repository stabilization, 3-way branch integration, dependency resolution (`httpx`, `laya`, `torch`, `boto3`, `ask-sdk-core`, `ask-sdk-webservice-support`, `cryptography`), and test suite alignment.
+- **P1 [COMPLETED]:** Core-to-Client capability completion: Wired `POST /api/v1/actions/{id}/complete` in backend and client.
+- **P2 [COMPLETED]:** AWS Bedrock Decision Engine adapter and Bedrock coding provider with fallback and configuration validation.
+- **P3 [COMPLETED]:** Alexa Skill endpoint and request adapter with ASK request signature, certificate URL, and timestamp verification (`tests/test_alexa.py` and `tests/test_alexa_security.py`).
+- **P4 [COMPLETED]:** Movie Buddy UI/UX enhancements and client capability execution integration verified across unit and Playwright E2E tests.
+- **P5 [COMPLETED]:** End-to-end integration testing, repository-wide CI quality workflow (`.github/workflows/quality.yml`), hackathon compliance documentation (`docs/HACKATHON_COMPLIANCE.md`), and demo walkthrough script (`docs/DEMO_SCRIPT.md`).
