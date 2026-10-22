@@ -248,7 +248,7 @@ class SessionStore:
 
     def _expire(self) -> None:
         now = utcnow()
-        stale = [sid for sid, state in self._sessions.items() if now - state.updated_at > self._ttl]
+        stale = [sid for sid, state in self._sessions.items() if now - state.updated_at >= self._ttl]
         for sid in stale:
             self._sessions.pop(sid, None)
 
