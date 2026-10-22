@@ -22,6 +22,7 @@ venv/
 .env
 .env.*
 !.env.example
+!**/.env.example
 
 # Editor / OS noise
 .vscode/
