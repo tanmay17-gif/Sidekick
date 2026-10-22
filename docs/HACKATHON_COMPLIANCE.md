@@ -52,8 +52,9 @@ npm run build
 ## 3. Disclosed Limitations & External Dependencies
 
 1. **Live AWS Bedrock Execution:**
-   - The Bedrock client and model integration are fully implemented and verified via unit tests and mock fixtures.
-   - Live execution against AWS Bedrock requires active AWS credentials (`AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_REGION`). When unconfigured, Sidekick falls back safely to self-hosted Laya or rule models.
+   - Both the Bedrock decision model (`sidekick/core/decisions/bedrock_model.py`) and the Bedrock coding provider (`sidekick_execution/providers/bedrock.py`) are fully implemented and verified via unit tests with mock fixtures.
+   - Uses the standard AWS credential chain (IAM role, env vars, profile) — **no separate LLM API key required**.
+   - When unconfigured, the decision engine falls back safely to self-hosted Laya or rule model; the coding service reports `NOT_CONFIGURED` with a precise hint.
 2. **Live Remote Coding LLM Key:**
    - The coding execution provider supports OpenAI-compatible remote endpoints via `SIDEKICK_LLM_API_KEY`.
    - When not supplied, the execution engine honestly marks the remote provider as `NOT_CONFIGURED` while supporting local CLI execution and sandbox simulation.

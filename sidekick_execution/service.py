@@ -41,6 +41,7 @@ from .events import EventBus
 from .jobs import JobManager, JobStore
 from .providers.base import ClaimLevel, CodingProvider, ProviderStatus, UnconfiguredCodingProvider
 from .providers.config import ProviderConfig
+from .providers.bedrock import BedrockCodingProvider
 from .providers.http_api import HttpApiCodingProvider
 from .providers.local_cli import LocalCliCodingProvider
 from .providers.simulated import SimulatedCodingProvider
@@ -366,7 +367,8 @@ class ExecutionService:
             )
         return STATUS_NOT_CONFIGURED, (
             f"No coding provider is available ({status.reason}). "
-            "Set SIDEKICK_LLM_API_KEY or SIDEKICK_CODING_CLI to enable one."
+            "Supported options: AWS Bedrock (with AWS credentials), "
+            "HTTP API (set SIDEKICK_LLM_API_KEY), or an authorized local CLI (set SIDEKICK_CODING_CLI)."
         )
 
     # -- tool handlers -----------------------------------------------------
@@ -591,6 +593,8 @@ def select_provider(
 
     name = (name or config.name or "auto").strip().lower()
     runner = CommandRunner(command_policy) if command_policy else None
+    if name == "bedrock":
+        return BedrockCodingProvider(config=config)
     if name == "http_api":
         return HttpApiCodingProvider(config=config)
     if name == "local_cli":
@@ -599,6 +603,7 @@ def select_provider(
         return SimulatedCodingProvider()
 
     candidates = [
+        BedrockCodingProvider(config=config),
         HttpApiCodingProvider(config=config),
         LocalCliCodingProvider(config=config, runner=runner),
     ]

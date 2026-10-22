@@ -142,7 +142,7 @@ class ProviderSelectionTests(unittest.TestCase):
 
     def test_supported_names_are_documented(self) -> None:
         self.assertEqual(
-            set(SUPPORTED_PROVIDERS), {"auto", "http_api", "local_cli", "simulated"}
+            set(SUPPORTED_PROVIDERS), {"auto", "bedrock", "http_api", "local_cli", "simulated"}
         )
 
 

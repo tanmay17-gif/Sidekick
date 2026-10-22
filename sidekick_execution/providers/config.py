@@ -24,7 +24,7 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, Mapping, Optional, Tuple
 
 #: The provider names this deployment understands.
-SUPPORTED_PROVIDERS: Tuple[str, ...] = ("auto", "http_api", "local_cli", "simulated")
+SUPPORTED_PROVIDERS: Tuple[str, ...] = ("auto", "bedrock", "http_api", "local_cli", "simulated")
 
 DEFAULT_BASE_URL = "https://api.openai.com/v1"
 DEFAULT_MODEL = "gpt-4o-mini"

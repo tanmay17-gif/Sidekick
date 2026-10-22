@@ -173,15 +173,19 @@ def build_decision_model(prefer_model: str | None = None) -> tuple[DecisionModel
         rule.fallback_reason = "the decision model was disabled by configuration"
         return rule, RuleDecisionModel(), rule.fallback_reason
 
-    if choice in ("bedrock", "aws-bedrock") or (choice == "auto" and os.environ.get("BEDROCK_MODEL_ID")):
+    if choice in ("bedrock", "aws-bedrock"):
         bedrock = BedrockDecisionModel()
         if bedrock.available:
             return bedrock, RuleDecisionModel(), ""
-        if choice != "auto":
-            rule = RuleDecisionModel()
-            reason = "AWS Bedrock credentials/region are not configured"
-            rule.fallback_reason = reason
-            return rule, RuleDecisionModel(), reason
+        rule = RuleDecisionModel()
+        reason = "AWS Bedrock credentials/region are not configured"
+        rule.fallback_reason = reason
+        return rule, RuleDecisionModel(), reason
+
+    if choice == "auto":
+        bedrock = BedrockDecisionModel()
+        if bedrock.available:
+            return bedrock, RuleDecisionModel(), ""
 
     laya = LayaDecisionModel()
     if laya.available:

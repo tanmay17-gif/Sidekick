@@ -15,6 +15,7 @@ from .base import (
     ProviderResult,
     ProviderStatus,
 )
+from .bedrock import BedrockCodingProvider
 from .http_api import HttpApiCodingProvider
 from .local_cli import LocalCliCodingProvider
 from .simulated import SimulatedCodingProvider
@@ -27,6 +28,7 @@ __all__ = [
     "FileEdit",
     "ProviderResult",
     "ProviderStatus",
+    "BedrockCodingProvider",
     "HttpApiCodingProvider",
     "LocalCliCodingProvider",
     "SimulatedCodingProvider",
