@@ -1,0 +1,70 @@
+{
+  "owner": "agent3",
+  "note": "Capabilities that the browser client executes locally. The core plans them and reports them honestly; the client runs them and reports the outcome back through POST /v1/actions/{id}/complete. Agent 3 owns this file - the core only reads it.",
+  "capabilities": [
+    {
+      "id": "movie.play",
+      "label": "play a movie",
+      "detail": "The browser client plays the movie. The core plans it and waits for the client's report; it does not play anything itself.",
+      "aliases": [
+        "play a movie",
+        "watch a movie",
+        "find a movie",
+        "put on a film",
+        "start the movie"
+      ],
+      "arguments": [
+        {
+          "name": "title",
+          "type": "string",
+          "required": false,
+          "description": "which film to play"
+        }
+      ],
+      "speech_template": "Playing {title}."
+    },
+    {
+      "id": "media.play",
+      "label": "play music",
+      "detail": "The browser client plays the music. The core plans it and waits for the client's report; it does not play anything itself.",
+      "aliases": [
+        "play some music",
+        "play music",
+        "play some",
+        "put on some music",
+        "listen to music",
+        "play a song"
+      ],
+      "arguments": [
+        {
+          "name": "query",
+          "type": "string",
+          "required": false,
+          "description": "what to play"
+        }
+      ],
+      "speech_template": "Playing {query}."
+    },
+    {
+      "id": "game.start",
+      "label": "play a game",
+      "detail": "The browser client starts the game. The core plans it and waits for the client's report; it does not start anything itself.",
+      "aliases": [
+        "start a game",
+        "play a game",
+        "play chess",
+        "start chess",
+        "let's play chess"
+      ],
+      "arguments": [
+        {
+          "name": "game",
+          "type": "string",
+          "required": false,
+          "description": "which game to start"
+        }
+      ],
+      "speech_template": "Starting {game}."
+    }
+  ]
+}

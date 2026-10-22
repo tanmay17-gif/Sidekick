@@ -22,15 +22,19 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
+from urllib.parse import quote_plus
 
 from ..core.catalog import (
     ARG_DURATION,
     ARG_ENUM,
     ARG_STRING,
+    CAPTURE_EXCEPT_WHEN,
     CAPTURE_QUOTED,
+    CAPTURE_WHEN,
     ArgumentSpec,
     ToolSpec,
 )
+from ..core.parsing import format_when, parse_when
 from ..core.registry import ToolContext, ToolResult
 from ..core.schemas import Action, ActionError, RiskLevel
 
@@ -63,6 +67,8 @@ class NoteWriteTool(_NoteToolBase):
     spec = ToolSpec(
         name="note.write",
         description="Write a note for the user so it can be read back later",
+        label="write a note",
+        detail="Saves a real note that can be read back later.",
         aliases=("write a note", "take a note", "note this down", "save a note", "remember this"),
         risk=RiskLevel.LOW,
         requires_approval=False,
@@ -131,6 +137,8 @@ class NoteReadTool(_NoteToolBase):
     spec = ToolSpec(
         name="note.read",
         description="Read notes the user asked to save earlier",
+        label="read my notes",
+        detail="Reads back the notes that were saved earlier.",
         aliases=("read my notes", "show my notes", "list notes", "open my notes"),
         risk=RiskLevel.LOW,
         requires_approval=False,
@@ -217,6 +225,8 @@ class TimerSetTool:
     spec = ToolSpec(
         name="timer.set",
         description="Start a countdown timer that notifies the user when it is done",
+        label="set a timer",
+        detail="Starts a real countdown and reports it when it is done.",
         aliases=("set a timer", "start a timer", "remind me in", "countdown"),
         risk=RiskLevel.LOW,
         requires_approval=False,
@@ -334,6 +344,8 @@ class TimerListTool:
     spec = ToolSpec(
         name="timer.list",
         description="List the timers that are currently running",
+        label="list my timers",
+        detail="Lists the timers that are currently scheduled.",
         aliases=("list timers", "show my timers", "what timers do i have"),
         risk=RiskLevel.LOW,
         arguments=(),
@@ -379,13 +391,231 @@ MEDIA_LABELS: dict[str, str] = {
 }
 
 
+class WebSearchTool:
+    """Searches the web by opening a real search URL in the browser.
+
+    This is *not* a booking, a purchase or a content fetch - it is the real
+    search results page for the user's query. When Agent 2's ``web.fetch``
+    adapter is registered it is preferred, because it returns the content
+    instead of a page to look at.
+    """
+
+    spec = ToolSpec(
+        name="web.search",
+        description="Search the web and show the real results",
+        aliases=(
+            "search",
+            "search for",
+            "search the web for",
+            "look up",
+            "google",
+            "find out",
+            "research",
+            "browse for",
+            "what is",
+            "who is",
+        ),
+        risk=RiskLevel.LOW,
+        requires_approval=False,
+        reversible=True,
+        cancellable=False,
+        label="search the web",
+        speech_template="Searching for {query}.",
+        detail=(
+            "Opens the real search results page for a query. It does not read, "
+            "summarise or verify the results - that needs a content fetch."
+        ),
+        arguments=(
+            ArgumentSpec(
+                name="query",
+                type=ARG_STRING,
+                required=True,
+                description="what to search for",
+                aliases=("for", "text", "search"),
+            ),
+            ArgumentSpec(
+                name="engine",
+                type=ARG_ENUM,
+                required=False,
+                description="which search engine to use",
+                enum=("google", "bing", "duckduckgo"),
+                default="google",
+            ),
+        ),
+        result_fields=("query", "engine", "url", "opened"),
+    )
+
+    ENGINES: dict[str, str] = {
+        "google": "https://www.google.com/search?q=",
+        "bing": "https://www.bing.com/search?q=",
+        "duckduckgo": "https://duckduckgo.com/?q=",
+    }
+
+    def execute(self, action: Action, arguments: dict[str, Any], context: ToolContext) -> ToolResult:
+        query = str(arguments.get("query") or "").strip()
+        if not query:
+            return ToolResult(
+                ok=False,
+                error=ActionError(code="missing_query", message="the search needs something to look for"),
+            )
+        engine = str(arguments.get("engine") or "google")
+        prefix = self.ENGINES.get(engine, self.ENGINES["google"])
+        url = prefix + quote_plus(query)
+        try:
+            opened = bool(webbrowser.open(url))
+        except Exception as exc:  # noqa: BLE001 - the browser is optional
+            return ToolResult(
+                ok=False,
+                error=ActionError(
+                    code="browser_unavailable",
+                    message=f"could not open the browser: {exc}",
+                    retryable=True,
+                ),
+            )
+        if not opened:
+            return ToolResult(
+                ok=False,
+                error=ActionError(
+                    code="browser_unavailable",
+                    message="no browser is available on this machine",
+                    retryable=True,
+                ),
+            )
+        return ToolResult(
+            ok=True,
+            data={
+                "query": query,
+                "engine": engine,
+                "url": url,
+                "opened": True,
+                "kind": "search_results_page",
+                "note": "the results page is open; the content was not read",
+            },
+        )
+
+    def cancel(self, action_id: str) -> bool:
+        return True
+
+
+class ReminderSetTool:
+    """Schedules a real reminder that fires at the requested local time.
+
+    The reminder is a real scheduled task: a background timer waits for the
+    moment and then completes the action, so the browser learns about it
+    through the action's event stream.
+    """
+
+    spec = ToolSpec(
+        name="reminder.set",
+        description="Set a reminder for a specific time",
+        aliases=("remind me", "set a reminder", "reminder", "remind"),
+        risk=RiskLevel.LOW,
+        requires_approval=False,
+        reversible=True,
+        cancellable=True,
+        label="set a reminder",
+        speech_template="Reminder set for {at}.",
+        detail=(
+            "Schedules a reminder in the running process. It fires while the "
+            "process runs; it is not delivered after a restart."
+        ),
+        arguments=(
+            ArgumentSpec(
+                name="text",
+                type=ARG_STRING,
+                required=True,
+                description="what to be reminded of",
+                aliases=("message", "note", "reminder"),
+                capture=CAPTURE_EXCEPT_WHEN,
+            ),
+            ArgumentSpec(
+                name="at",
+                type=ARG_STRING,
+                required=True,
+                description="when the reminder is due, e.g. '6 pm' or 'in 20 minutes'",
+                aliases=("when", "time"),
+                capture=CAPTURE_WHEN,
+                remember=False,
+            ),
+        ),
+        result_fields=("reminder", "due_at", "when"),
+    )
+
+    def __init__(self) -> None:
+        self._timers: dict[str, threading.Timer] = {}
+        self._lock = threading.Lock()
+
+    def execute(self, action: Action, arguments: dict[str, Any], context: ToolContext) -> ToolResult:
+        text = str(arguments.get("text") or "").strip()
+        when_text = str(arguments.get("at") or "").strip()
+        if not text:
+            return ToolResult(
+                ok=False,
+                error=ActionError(code="empty_reminder", message="the reminder needs something to say"),
+            )
+        due = parse_when(when_text)
+        if due is None:
+            return ToolResult(
+                ok=False,
+                error=ActionError(
+                    code="unparseable_time",
+                    message=f"could not work out when '{when_text}' is",
+                ),
+            )
+
+        delay = max(1.0, (due - datetime.now().astimezone()).total_seconds())
+
+        def fire() -> None:
+            context.complete(
+                ToolResult(
+                    ok=True,
+                    data={
+                        "reminder": text,
+                        "due_at": due.isoformat(),
+                        "when": format_when(due),
+                        "fired": True,
+                        "delivery": "in-process; a restart loses the reminder",
+                    },
+                )
+            )
+
+        timer = threading.Timer(delay, fire)
+        timer.daemon = True
+        with self._lock:
+            self._timers[action.action_id] = timer
+        timer.start()
+
+        return ToolResult(
+            ok=True,
+            ongoing=True,
+            data={
+                "reminder": text,
+                "due_at": due.isoformat(),
+                "when": format_when(due),
+                "in_seconds": round(delay),
+                "delivery": "in-process; a restart loses the reminder",
+            },
+        )
+
+    def cancel(self, action_id: str) -> bool:
+        with self._lock:
+            timer = self._timers.pop(action_id, None)
+        if timer is None:
+            return False
+        timer.cancel()
+        return True
+
+
 class MediaOpenTool:
     """Opens a real URL with the system browser."""
 
     spec = ToolSpec(
         name="media.open",
         description="Open a service or app in the browser",
-        aliases=("open", "launch", "browse", "go to", "show me"),
+        aliases=("open", "launch", "go to", "open up"),
+        label="open a service",
+        speech_template="Opening {destination}.",
+        detail="Opens the real service in the browser.",
         risk=RiskLevel.LOW,
         requires_approval=False,
         reversible=True,
@@ -412,7 +642,6 @@ class MediaOpenTool:
             ),
         ),
         result_fields=("destination", "url", "opened"),
-        speech_template="Opening {destination}.",
     )
 
     @staticmethod

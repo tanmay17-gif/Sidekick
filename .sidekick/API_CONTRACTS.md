@@ -179,6 +179,23 @@ This is the union of the browser client's `ProgressEvent` (Agent 3) and the exec
 event object (Agent 2, `docs/execution-service-contract.md` §4): `type`/`kind`/`seq`/`ts`/`tool`/
 `status`/`job_id` are all present, so neither consumer has to change.
 
+### Capability discovery
+
+`POST /api/v1/requests` with "what can you actually do?" answers from the catalog. The answer is in
+`action_plan[0].result.capabilities` (a list of `{id, label, detail, state, owner,
+execution_target}`) and in the spoken line. The states are the truth about the *whole* product:
+
+| `state` | Meaning |
+|---|---|
+| `live` | a real server adapter runs it |
+| `client` | the browser client runs it; the core plans it and waits |
+| `unavailable` | declared, but no adapter is wired up in this deployment |
+| `simulated` | a double stands in for the real thing (nothing in the core is) |
+| `unconfigured` | the code is there but a credential or provider is missing |
+
+The spoken line names the two groups separately ("I can ... in the app I can ..."), because the core
+did not run the client side.
+
 ## Capability inventory
 
 `GET /api/v1/capabilities` (alias `GET /v1/capabilities`)
@@ -190,7 +207,10 @@ The response carries both vocabularies the team uses, computed from the same sou
   "contract_version": "v1",
   "mode": "live",
   "capabilities": [
-    { "id": "note.write", "state": "live", "detail": "backed by a real adapter" }
+    { "id": "note.write", "label": "write a note", "detail": "...", "state": "live", "owner": "core", "execution_target": "server" }
+  ],
+  "client_capabilities": [
+    { "id": "media.play", "label": "play music", "detail": "...", "state": "client", "owner": "agent3", "execution_target": "client" }
   ],
   "tools": [
     {
@@ -200,8 +220,10 @@ The response carries both vocabularies the team uses, computed from the same sou
       "approval_required": false,
       "risk_level": "low",
       "status": "REAL",
-      "status_detail": "backed by a real adapter",
-      "simulated": false
+      "status_detail": "...",
+      "simulated": false,
+      "execution_target": "server",
+      "owner": "core"
     }
   ],
   "tool_count": 1,
@@ -212,12 +234,60 @@ The response carries both vocabularies the team uses, computed from the same sou
 }
 ```
 
-- `capabilities[].state` uses the browser vocabulary `live | simulated | unavailable | unconfigured |
-  disconnected` (Agent 3, `web/docs/CONTRACT_NOTES.md` §2).
-- `tools[].status` uses the execution vocabulary `REAL | SIMULATED | NOT_CONFIGURED | NOT_IMPLEMENTED`
-  (Agent 2, `docs/execution-service-contract.md` §6).
+- `capabilities[]` lists the **server side** only, with the state vocabulary the browser already
+  renders: `live | simulated | unavailable | unconfigured | disconnected`. It never grows a new
+  value, so an existing client keeps working unchanged.
+- `client_capabilities[]` lists the capabilities the **browser client** runs. Their state is
+  `client` and their `owner` says who implements them. They are not in `capabilities[]` and not
+  in `tools[]`: a server tool report would either claim they work or claim they do not exist.
+- `tools[]` uses the execution vocabulary `REAL | SIMULATED | NOT_CONFIGURED | NOT_IMPLEMENTED`.
 - The UI renders these verbatim; it never upgrades a state on its own. A capability without an
   adapter is `unavailable` / `NOT_IMPLEMENTED`, never `live`.
+
+### Capabilities the client executes
+
+`sidekick/client_capabilities.json` is the declaration of the capabilities the **browser client**
+runs (media, movies, games). **Agent 3 owns the file**; the core reads it if it is present and
+simply has fewer capabilities if it is not. The core ships a default declaration so the product is
+never silently missing a capability, and Agent 3 is free to edit it.
+
+The flow:
+
+1. the core routes the utterance to the declared capability and plans the action;
+2. the action stays `pending` with
+
+   ```json
+   {
+     "execution_target": "client",
+     "status": "awaiting_client",
+     "capability": "media.play",
+     "client_deadline": 1764000000.0
+   }
+   ```
+
+3. the client runs the capability and reports the real outcome with
+   `POST /v1/actions/{action_id}/complete`:
+
+   ```json
+   {
+     "session_id": "<the session the core handed out>",
+     "status": "succeeded | failed | cancelled | pending | running",
+     "result": { "...": "whatever the client really did" },
+     "error": { "code": "...", "message": "...", "retryable": false, "timeout": false }
+   }
+   ```
+
+The rules the two sides agreed on:
+
+| Rule | Where it is enforced |
+|---|---|
+| the client uses the `action_id` and `session_id` the core returned | the core looks the action up by id in that session |
+| only a **client** capability can be completed by the client | completing a server capability is `409 conflict` |
+| the core records exactly what the client reported | the result is stored verbatim |
+| the core never claims success on its own | the action stays `pending` until the client reports |
+| a client action cannot stay pending forever | after `client_deadline` (120 s) the action becomes `failed` with `error.code = "client_timeout"`, `timeout: true` |
+| completing an action twice is refused | `409 conflict` |
+
 
 ## Action lifecycle
 
@@ -265,7 +335,11 @@ Transitions:
   "result_fields": ["path", "bytes"],
   "destinations": [],
   "destination_labels": { "youtube": "YouTube" },
-  "speech_template": "Opening {destination}."
+  "speech_template": "Opening {destination}.",
+  "label": "open a service",
+  "owner": "core",
+  "execution_target": "server",
+  "detail": "Opens the real service in the browser."
 }
 ```
 
@@ -274,11 +348,25 @@ Transitions:
 - `quoted` - only an explicitly quoted or named value is accepted,
 - `remainder` - the text that follows the tool alias,
 - `auto` - quoted when available, otherwise the remainder,
-- `none` - the value is only ever supplied by the caller.
+- `none` - the value is only ever supplied by the caller,
+- `when` - the part of the utterance that says *when* ("at 6 pm"),
+- `except_when` - the utterance without that part.
+
+`remember` (default `true`) says whether a value may be carried over from the
+previous turn of the same session. A time must not be: the user did not say it
+again.
 
 `speech_template` is the short line the voice interface speaks, e.g. `"Opening {destination}."`.
 The placeholders are filled from the action's arguments; a placeholder without a value is dropped.
 `destination_labels` gives the spoken spelling of a destination (`"youtube"` -> `"YouTube"`).
+`label` is the human name used in the capability inventory and in the answers to
+"what can you do?". `owner` says who implements it (`core`, `agent2`, `agent3`).
+`execution_target` says where the work happens:
+
+| `execution_target` | Meaning |
+|---|---|
+| `server` | an adapter runs it in the core process |
+| `client` | the browser client runs it; the core plans the action and waits for the report |
 
 ### Adapter protocol (Agent 2)
 
@@ -338,6 +426,7 @@ browser client uses by default) and `/v1/...` (shorter aliases).
 | `GET` | `/api/v1/media/catalog` | media assets (the core ships none; the browser falls back to the bundled film) |
 | `GET` | `/api/v1/actions/{action_id}` | one action and its events |
 | `GET` | `/api/v1/actions/{action_id}/events` | SSE stream of the action's events |
+| `POST` | `/api/v1/actions/{action_id}/complete` | report the outcome of a capability the **client** executed |
 | `POST` | `/api/v1/actions/{action_id}/approve` (alias `/confirm`) | approve or refuse a pending action |
 | `POST` | `/api/v1/actions/{action_id}/cancel` | cancel one pending or running action |
 | `GET` | `/v1/sessions/{session_id}` | session state, tasks, actions |

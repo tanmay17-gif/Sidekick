@@ -62,6 +62,16 @@ def create_app(engine: DecisionEngine | None = None) -> FastAPI:
     if static_dir.exists():
         app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
 
+    # The real demo is the browser client (Agent 3's `web/`). When it has
+    # been built, the core serves it - so a demo never accidentally shows
+    # only the backend's placeholder page. The build is Agent 3's; the core
+    # only serves it.
+    web_dist = Path(__file__).resolve().parents[2] / "web" / "dist"
+    if (web_dist / "index.html").exists():
+        assets = web_dist / "assets"
+        if assets.is_dir():
+            app.mount("/assets", StaticFiles(directory=str(assets)), name="web-assets")
+
     # -- error envelope ---------------------------------------------------
 
     @app.exception_handler(SidekickError)
@@ -128,24 +138,32 @@ def create_app(engine: DecisionEngine | None = None) -> FastAPI:
         The response carries both vocabularies the team uses: ``capabilities``
         with the UI's ``state`` values and ``tools`` with the execution
         service's ``status`` values. Nothing is upgraded on the UI side, so
-        both are computed from the same source of truth.
+        both are computed from the same source of truth - the engine's
+        inventory.
         """
-        catalog = engine.registry.catalog
-        capability_items: list[dict[str, Any]] = []
+        server = engine.server_capabilities()
+        client = engine.client_capabilities()
+        by_id = {item["id"]: item for item in server}
+
         tool_items: list[dict[str, Any]] = []
         status_counts: dict[str, int] = {}
-
-        for spec in catalog:
-            available = engine.registry.is_available(spec.name)
-            state = "live" if available else "unavailable"
-            detail = (
-                "backed by a real adapter"
-                if available
-                else "declared in the catalog, no adapter is wired up yet"
+        for spec in engine.registry.catalog:
+            if spec.execution_target == "client":
+                # The client side has its own list; a server tool report
+                # would either claim it works or claim it does not exist.
+                continue
+            # An adapter may describe itself more precisely than "there is
+            # an adapter" (the execution service reports whether a *real*
+            # coding provider is behind it), so the browser never sees
+            # "live" for a capability that would fail.
+            reported = _adapter_status(engine, spec.name)
+            default_status = (
+                "REAL" if engine.registry.is_available(spec.name) else "NOT_IMPLEMENTED"
             )
-            capability_items.append({"id": spec.name, "state": state, "detail": detail})
-
-            status = "REAL" if available else "NOT_IMPLEMENTED"
+            status = str(reported.get("status") or default_status)
+            detail = str(reported.get("detail") or by_id.get(spec.name, {}).get("detail", ""))
+            simulated = status == "SIMULATED"
+            state = _STATE_BY_STATUS.get(status, by_id.get(spec.name, {}).get("state", "unavailable"))
             status_counts[status] = status_counts.get(status, 0) + 1
             tool_items.append(
                 {
@@ -156,18 +174,25 @@ def create_app(engine: DecisionEngine | None = None) -> FastAPI:
                     "risk_level": spec.risk.value,
                     "status": status,
                     "status_detail": detail,
-                    "simulated": False,
+                    "simulated": simulated,
+                    "execution_target": spec.execution_target,
+                    "owner": spec.owner,
                 }
             )
+            # The browser renders the state vocabulary it already knows.
+            if spec.name in by_id:
+                by_id[spec.name]["state"] = state
+                by_id[spec.name]["detail"] = detail
 
         return {
             "contract_version": CONTRACT_VERSION,
             "mode": "live",
-            "capabilities": capability_items,
+            "capabilities": list(by_id.values()),
+            "client_capabilities": client,
             "tools": tool_items,
             "tool_count": len(tool_items),
             "status_counts": status_counts,
-            "any_simulated": False,
+            "any_simulated": any(item["simulated"] for item in tool_items),
             "games": [],
             "providers": [],
         }
@@ -263,6 +288,42 @@ def create_app(engine: DecisionEngine | None = None) -> FastAPI:
             ],
         }
 
+    @app.post("/api/v1/actions/{action_id}/complete")
+    @app.post("/v1/actions/{action_id}/complete")
+    async def complete_action(
+        action_id: str,
+        session_id: str = Body(..., embed=True),
+        status: str = Body(..., embed=True),
+        result: dict | None = Body(default=None, embed=True),
+        error: dict | None = Body(default=None, embed=True),
+    ) -> dict[str, Any]:
+        """Report the outcome of a capability the *client* executed.
+
+        The core plans the capabilities that belong to the browser (media,
+        movies, games). The client runs them and reports the real outcome
+        here. Without this call the action stays ``pending`` - the core never
+        claims the client did something.
+        """
+        from ..core.schemas import ActionError
+
+        parsed_error = None
+        if error:
+            parsed_error = ActionError(
+                code=str(error.get("code", "client_error")),
+                message=str(error.get("message", "the client reported a failure")),
+                retryable=bool(error.get("retryable", False)),
+                timeout=bool(error.get("timeout", False)),
+                details=error.get("details") or {},
+            )
+        action = engine.complete_action(
+            session_id,
+            action_id,
+            status=status,
+            result=result,
+            error=parsed_error,
+        )
+        return {"action": action.model_dump(mode="json")}
+
     @app.get("/api/v1/actions/{action_id}/events")
     @app.get("/v1/actions/{action_id}/events")
     async def action_events(
@@ -319,6 +380,10 @@ def create_app(engine: DecisionEngine | None = None) -> FastAPI:
 
     @app.get("/")
     async def index() -> Any:
+        # The built browser client wins over the placeholder page.
+        client_index = web_dist / "index.html"
+        if client_index.exists():
+            return FileResponse(str(client_index))
         page = static_dir / "index.html"
         if page.exists():
             return FileResponse(str(page))
@@ -339,7 +404,49 @@ def create_app(engine: DecisionEngine | None = None) -> FastAPI:
             }
         )
 
+    @app.get("/{path:path}")
+    async def client_routes(path: str) -> Any:
+        """Client side routes of the built browser app (single page app)."""
+        client_index = web_dist / "index.html"
+        if not client_index.exists():
+            raise HTTPException(status_code=404, detail="not found")
+        if path.startswith(("api/", "v1/", "static/", "healthz")):
+            raise HTTPException(status_code=404, detail="not found")
+        return FileResponse(str(client_index))
+
     return app
+
+
+#: The execution status vocabulary, mapped onto the states the browser
+#: already renders (``live | simulated | unavailable | unconfigured |
+#: disconnected``).
+_STATE_BY_STATUS = {
+    "REAL": "live",
+    "SIMULATED": "simulated",
+    "NOT_CONFIGURED": "unconfigured",
+    "NOT_IMPLEMENTED": "unavailable",
+    "UNAVAILABLE": "unavailable",
+}
+
+
+def _adapter_status(engine: DecisionEngine, tool: str) -> dict[str, Any]:
+    """What an adapter says about itself, when it says anything.
+
+    An adapter may implement ``capability_status()`` and report e.g.
+    ``{"status": "NOT_CONFIGURED", "detail": "..."}``. The report is never
+    allowed to break the capability inventory.
+    """
+    adapter = engine.registry.get(tool)
+    if adapter is None:
+        return {}
+    describe = getattr(adapter, "capability_status", None)
+    if not callable(describe):
+        return {}
+    try:
+        reported = describe()
+    except Exception:  # noqa: BLE001 - never break the report
+        return {}
+    return reported if isinstance(reported, dict) else {}
 
 
 def _find_action(

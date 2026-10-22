@@ -84,15 +84,31 @@ No keyword list lives inside the engine.
 
 | Question | Decided by | Why |
 |---|---|---|
-| Which capability? | the decision model (Laya), with the deterministic matcher as a second opinion | the model is calibrated and general |
-| Which service/destination? | the model, but only above a confidence floor; the catalog matcher otherwise | the model answers destinations with 100% accuracy when it is sure and guesses when it is not |
+| Which capability? | the **deterministic matcher decides which capabilities the utterance supports**; the model chooses *between* them | measured with the real model: on an answer space it is not calibrated for it answered "order dinner for me" and "xyzzy plugh" with "read my notes" *and reported success* |
+| Which service/destination? | the model, but only among the destinations the utterance mentions | the model answers destinations with 100% accuracy when there is one and invents one with ~0.3 confidence when there is not |
 | Is this a correction? | the deterministic discourse markers, plus the model's `is_correction` signal | measured: the model scored 0.03 on a clear correction, the markers are reliable |
 | Is this a control verb (cancel, pause, resume)? | the deterministic control grammar only | measured: with control intents in the answer space the model picked a control more often than the right capability |
+| Is this a question about the product? | the deterministic capability-question grammar | the answer comes from the catalog; the word "actually" in "what can you actually do" is also a correction marker |
 | How many actions? | the deterministic segmentation | splitting must never lose a segment; the model has no reliable multi-action signal |
 | Is it safe, does it need approval, are the arguments valid? | the deterministic safety policy | the model can never grant itself permission |
 
 The rule is simple: **the model interprets, the deterministic layers decide.** Every deterministic
 override is visible in the response (`decision_model.fallback_used` plus the reason).
+
+#### The anchor
+
+`DecisionEngine._anchor_to_utterance` is the gate the model's answer passes:
+
+- the deterministic matcher computes which capabilities the utterance supports
+  (content-word matching against the catalog's aliases);
+- if the model's capability is one of them, the model decides;
+- if it is not, the model is **overruled** and the deterministic candidate is used;
+- if the utterance supports nothing, the answer is an honest "I do not have a capability for that
+  yet" - never an arbitrary action.
+
+A destination that exactly one capability owns also identifies that capability, so "no, I meant
+Spotify" resolves to the capability that owns Spotify.
+
 
 ### Corrections are resolved before the model sees the text
 

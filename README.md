@@ -22,12 +22,23 @@ that the execution layer (Agent 2) and the voice/UI layer (Agent 3) build on.
 | Session isolation (two live sessions, no cross-talk) | real | `tests/test_sessions.py` |
 | Pause / resume / cancel / supersede | real | `tests/test_lifecycle.py` |
 | Approval + refusal for irreversible actions | real | `tests/test_safety.py` |
-| Real decision model (`convaiinnovations/laya`) with observable fallback | real | `scripts/eval_laya.py`, `reports/` |
-| Local execution adapters (notes, timers, browser) | real | `tests/test_tools.py` |
-| Service integrations (music, coding agent, games) | **not implemented** | Agent 2 / Agent 3 |
+| Real decision model (`convaiinnovations/laya`) with observable fallback | real | `scripts/eval_laya.py`, `tests/test_laya_integration.py` |
+| Web search (a real search results page) | real | `tests/test_capabilities.py` |
+| Reminders (a real scheduled moment) | real | `tests/test_capabilities.py` |
+| Notes, timers, opening a service (local adapters) | real | `tests/test_tools.py` |
+| Capability discovery ("what can you do?") | real | `tests/test_capabilities.py` |
+| Music / movies / games (the browser client runs them) | declared | `sidekick/client_capabilities.json` |
+| Coding execution, web fetch | **not in `main`** | Agent 2's `agent2/core-integration` |
+| Flight booking, food ordering | **not implemented** | no owner, no provider |
 
 Nothing in this repository simulates a service and calls it real. Where a
 capability has no adapter yet, the API answers `tool_unavailable` and says so.
+
+**What the product can actually do is documented in
+[`docs/CAPABILITY_REALITY_AUDIT.md`](docs/CAPABILITY_REALITY_AUDIT.md)** - it is an audit, not a
+wish list, and it distinguishes "opens the app" from "does the task". The reproducible failures
+behind it are in [`docs/DECISION_FAILURES.md`](docs/DECISION_FAILURES.md).
+
 
 ---
 
@@ -53,7 +64,31 @@ Agent 3 owns the real experience).
 Run the tests:
 
 ```bash
-python -m pytest            # 99 tests, no network and no model weights needed
+python -m pytest            # 189 passed, 7 skipped - no network, no model weights
+```
+
+The seven skipped tests are opt-in: the real-model integration tests (they need
+the ~800 MB checkpoint) and the wheel build.
+
+```bash
+SIDEKICK_RUN_MODEL_TESTS=1 python -m pytest tests/test_laya_integration.py
+SIDEKICK_PACKAGING_BUILD=1   python -m pytest tests/test_packaging.py
+```
+
+Verify the running backend over real HTTP (it starts a real uvicorn server and
+uses the real model):
+
+```bash
+python scripts/verify_backend.py            # 20 checks
+python scripts/check_contract_compat.py     # against the other agents' branches
+python scripts/check_packaging.py --build   # builds a wheel and looks inside it
+```
+
+Reproduce what the product actually does with realistic requests:
+
+```bash
+python scripts/reproduce_requests.py                 # the deterministic fallback
+python scripts/reproduce_requests.py --model laya    # the real decision model
 ```
 
 Check that the core and the other agents still agree on the contract:
@@ -63,7 +98,7 @@ git fetch origin --prune
 python scripts/check_contract_compat.py
 ```
 
-Evaluate the real model (downloads ~800 MB of weights on first run):
+Evaluate the real model against a labelled set (raw output in `reports/`):
 
 ```bash
 python scripts/eval_laya.py --checkpoint typed-decisions --json reports/laya-typed-decisions.json

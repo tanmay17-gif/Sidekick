@@ -103,7 +103,16 @@ BROWSER_DECISION_MODEL_FIELDS = {"provider", "model", "fallback_used"}
 BROWSER_CLARIFICATION_FIELDS = {"question", "options"}
 
 #: The fields Agent 3's ``ProgressEvent`` reads.
-BROWSER_EVENT_FIELDS = {"seq", "kind", "message", "action_id", "tool", "data", "at"}
+BROWSER_EVENT_FIELDS = {"seq", "kind", "message", "action_id", "tool", "data", "at", "ts"}
+
+
+def _field_names(model) -> set[str]:
+    """The fields a pydantic model exposes, computed ones included."""
+    names = set(model.model_fields)
+    computed = getattr(model, "model_computed_fields", None)
+    if computed:
+        names |= set(computed)
+    return names
 
 
 def test_the_action_state_vocabulary_is_the_contract_v1_one() -> None:
@@ -111,18 +120,18 @@ def test_the_action_state_vocabulary_is_the_contract_v1_one() -> None:
 
 
 def test_the_core_provides_every_field_the_execution_service_reads() -> None:
-    assert EXECUTION_ACTION_FIELDS <= set(Action.model_fields)
-    assert EXECUTION_ERROR_FIELDS <= set(ActionError.model_fields)
+    assert EXECUTION_ACTION_FIELDS <= _field_names(Action)
+    assert EXECUTION_ERROR_FIELDS <= _field_names(ActionError)
 
 
 def test_the_core_provides_every_field_the_browser_client_reads() -> None:
-    assert BROWSER_REQUEST_FIELDS <= set(SidekickRequest.model_fields)
-    assert BROWSER_RESPONSE_FIELDS <= set(SidekickResponse.model_fields)
-    assert BROWSER_ACTION_FIELDS <= set(Action.model_fields)
-    assert BROWSER_INTENT_FIELDS <= set(IntentInfo.model_fields)
-    assert BROWSER_DECISION_MODEL_FIELDS <= set(DecisionModelInfo.model_fields)
-    assert BROWSER_CLARIFICATION_FIELDS <= set(Clarification.model_fields)
-    assert BROWSER_EVENT_FIELDS <= set(Event.model_fields)
+    assert BROWSER_REQUEST_FIELDS <= _field_names(SidekickRequest)
+    assert BROWSER_RESPONSE_FIELDS <= _field_names(SidekickResponse)
+    assert BROWSER_ACTION_FIELDS <= _field_names(Action)
+    assert BROWSER_INTENT_FIELDS <= _field_names(IntentInfo)
+    assert BROWSER_DECISION_MODEL_FIELDS <= _field_names(DecisionModelInfo)
+    assert BROWSER_CLARIFICATION_FIELDS <= _field_names(Clarification)
+    assert BROWSER_EVENT_FIELDS <= _field_names(Event)
 
 
 def test_the_core_accepts_the_correction_and_continuation_fields_the_browser_sends() -> None:

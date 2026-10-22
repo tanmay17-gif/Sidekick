@@ -1,18 +1,24 @@
 """Shared fixtures.
 
 The tests run against the *real* engine and the *real* local adapters (notes
-and timers really write files and really fire). Only the browser is stubbed,
-because opening a real browser during a test run would be a side effect on the
-developer machine.
+and timers really write files and really fire).
+
+**No test may open a real browser window.** `webbrowser.open` is replaced
+session wide by the `no_real_browser` fixture, so a test can never launch a
+browser by accident. The URLs the code *would* have opened are recorded and
+returned by the `browser` fixture.
 """
 
 from __future__ import annotations
 
+import os
+import webbrowser
 from pathlib import Path
 from typing import Any
 
 import pytest
 
+from sidekick.bootstrap import build_registry
 from sidekick.core.catalog import ARG_ENUM, ARG_STRING, ArgumentSpec, ToolSpec
 from sidekick.core.decisions.rule_model import RuleDecisionModel
 from sidekick.core.engine import DecisionEngine
@@ -20,7 +26,6 @@ from sidekick.core.registry import ToolContext, ToolRegistry, ToolResult
 from sidekick.core.safety import SafetyPolicy
 from sidekick.core.schemas import Action, RiskLevel
 from sidekick.core.sessions import SessionStore
-from sidekick.tools.local import MediaOpenTool, NoteReadTool, NoteWriteTool, TimerListTool, TimerSetTool
 
 
 class EchoTool:
@@ -134,33 +139,59 @@ class ModeTool:
         return True
 
 
+@pytest.fixture(autouse=True)
+def no_real_browser(monkeypatch: pytest.MonkeyPatch) -> list[str]:
+    """Make the real browser unreachable for the whole test session.
+
+    `webbrowser.open` and `webbrowser.get` are both replaced, so a test
+    cannot launch a window even by accident. A test that needs to know which
+    URL the code *would* have opened uses the ``browser`` fixture.
+
+    Set ``SIDECKICK_STRICT_BROWSER=1`` to turn every browser call into a
+    failure - useful when hunting a test that opens a window.
+    """
+    opened: list[str] = []
+    strict = os.environ.get("SIDECKICK_STRICT_BROWSER", "").lower() in {"1", "true", "yes"}
+
+    def fake_open(url: str, *args: Any, **kwargs: Any) -> bool:
+        if strict:
+            raise AssertionError(f"a test tried to open a real browser: {url}")
+        opened.append(url)
+        return True
+
+    monkeypatch.setattr(webbrowser, "open", fake_open)
+
+    # The real browser machinery is unreachable as well: `webbrowser.get()`
+    # hands out a controller that would start the browser on Windows.
+    class _NoBrowser:
+        def open(self, *args: Any, **kwargs: Any) -> bool:
+            raise AssertionError("a test tried to reach the real browser")
+
+        def open_new(self, *args: Any, **kwargs: Any) -> bool:
+            raise AssertionError("a test tried to reach the real browser")
+
+        def open_new_tab(self, *args: Any, **kwargs: Any) -> bool:
+            raise AssertionError("a test tried to reach the real browser")
+
+    monkeypatch.setattr(webbrowser, "get", lambda *a, **k: _NoBrowser())
+    return opened
+
+
+@pytest.fixture
+def browser(no_real_browser: list[str]) -> list[str]:
+    """The URLs the code opened during the test (never a real window)."""
+    return no_real_browser
+
+
 @pytest.fixture
 def workspace(tmp_path: Path) -> Path:
     return tmp_path / "workspace"
 
 
 @pytest.fixture
-def browser(monkeypatch) -> list[str]:
-    """Stub the system browser and record the URLs that were opened."""
-    opened: list[str] = []
-
-    def fake_open(url: str, *args: Any, **kwargs: Any) -> bool:
-        opened.append(url)
-        return True
-
-    monkeypatch.setattr("sidekick.tools.local.webbrowser.open", fake_open)
-    return opened
-
-
-@pytest.fixture
 def registry(workspace: Path) -> ToolRegistry:
-    reg = ToolRegistry()
-    timer = TimerSetTool()
-    reg.register(NoteWriteTool(workspace))
-    reg.register(NoteReadTool(workspace))
-    reg.register(timer)
-    reg.register(TimerListTool(timer))
-    reg.register(MediaOpenTool())
+    """The real registry, plus the test-only adapters."""
+    reg = build_registry(workspace)
     reg.register(EchoTool())
     reg.register(DangerTool())
     reg.register(FailingTool())

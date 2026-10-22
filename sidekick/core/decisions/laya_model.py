@@ -65,6 +65,7 @@ class LayaDecisionModel(BaseDecisionModel):
         *,
         device: str | None = None,
         timeout_seconds: float = 20.0,
+        first_call_timeout_seconds: float = 300.0,
         confidence_floor: float = 0.35,
         preload: bool = False,
         checkpoint: str | None = None,
@@ -74,6 +75,11 @@ class LayaDecisionModel(BaseDecisionModel):
         self.model = model_id
         self._device = device
         self._timeout = timeout_seconds
+        #: The very first call also builds the checkpoint, which takes far
+        #: longer than an inference (tens of seconds on a CPU). It gets its
+        #: own budget so a cold start is not reported as a timeout.
+        self._first_call_timeout = first_call_timeout_seconds
+        self._first_call = True
         self._confidence_floor = confidence_floor
         self._preload = preload or os.environ.get("LAYA_PRELOAD", "").lower() in {"1", "true", "yes"}
         self._checkpoint = (
@@ -271,8 +277,12 @@ class LayaDecisionModel(BaseDecisionModel):
         The call is blocking, so it runs in a daemon thread. A timeout leaves
         the worker thread running (we cannot kill it safely) but the request
         is answered immediately with a fallback.
+
+        The first call also builds the checkpoint, which is much slower than
+        an inference, so it gets its own (longer) budget.
         """
         box: dict[str, Any] = {}
+        budget = self._first_call_timeout if self._first_call else self._timeout
 
         def runner() -> None:
             try:
@@ -287,9 +297,10 @@ class LayaDecisionModel(BaseDecisionModel):
 
         worker = threading.Thread(target=runner, name="laya-predict", daemon=True)
         worker.start()
-        worker.join(self._timeout)
+        worker.join(budget)
         if worker.is_alive():
-            raise ModelTimeout(f"laya did not answer within {self._timeout:.1f}s")
+            raise ModelTimeout(f"laya did not answer within {budget:.1f}s")
+        self._first_call = False
         if "error" in box:
             error = box["error"]
             if isinstance(error, (ModelInvalidOutput, ModelTimeout, ModelUnavailable)):

@@ -109,6 +109,20 @@ def py_from_dict_keys(source: str, class_name: str) -> set[str]:
     return set(re.findall(r"raw\.get\(\s*[\"']([^\"']+)[\"']", match.group(0)))
 
 
+def model_field_names(model: Any) -> set[str]:
+    """The field names a pydantic model exposes.
+
+    ``model_fields`` does not include *computed* fields, but a computed field
+    is part of the serialised payload just like any other. The core's
+    ``Event.ts`` is one: the browser reads it, so the check must see it.
+    """
+    names = set(model.model_fields)
+    computed = getattr(model, "model_computed_fields", None)
+    if computed:
+        names |= set(computed)
+    return names
+
+
 # --------------------------------------------------------------------------
 # Comparison
 # --------------------------------------------------------------------------
@@ -144,7 +158,7 @@ def check_execution_service(source: str, report: Report) -> None:
     )
 
     keys = py_from_dict_keys(source, "Action")
-    mine_fields = set(Action.model_fields)
+    mine_fields = model_field_names(Action)
     missing = keys - mine_fields
     report.require(
         not missing,
@@ -152,7 +166,7 @@ def check_execution_service(source: str, report: Report) -> None:
     )
 
     error_keys = py_from_dict_keys(source, "ActionError")
-    mine_error = set(ActionError.model_fields)
+    mine_error = model_field_names(ActionError)
     missing_error = error_keys - mine_error
     report.require(
         not missing_error,
@@ -163,7 +177,7 @@ def check_execution_service(source: str, report: Report) -> None:
 def check_browser_client(source: str, report: Report) -> None:
     """The browser client (Agent 3) must be able to read our responses."""
     request_fields = ts_interface_fields(source, "SidekickRequest")
-    mine_request = set(SidekickRequest.model_fields)
+    mine_request = model_field_names(SidekickRequest)
     missing = request_fields - mine_request
     report.require(
         not missing,
@@ -171,7 +185,7 @@ def check_browser_client(source: str, report: Report) -> None:
     )
 
     response_fields = ts_interface_fields(source, "SidekickResponse")
-    mine_response = set(SidekickResponse.model_fields)
+    mine_response = model_field_names(SidekickResponse)
     missing = response_fields - mine_response
     report.require(
         not missing,
@@ -179,7 +193,7 @@ def check_browser_client(source: str, report: Report) -> None:
     )
 
     action_fields = ts_interface_fields(source, "Action")
-    mine_action = set(Action.model_fields)
+    mine_action = model_field_names(Action)
     missing = action_fields - mine_action
     report.require(
         not missing,
@@ -187,28 +201,28 @@ def check_browser_client(source: str, report: Report) -> None:
     )
 
     intent_fields = ts_interface_fields(source, "Intent")
-    missing = intent_fields - set(IntentInfo.model_fields)
+    missing = intent_fields - model_field_names(IntentInfo)
     report.require(
         not missing,
         f"the browser client reads intent fields the core does not provide: {sorted(missing)}",
     )
 
     model_fields = ts_interface_fields(source, "DecisionModel")
-    missing = model_fields - set(DecisionModelInfo.model_fields)
+    missing = model_fields - model_field_names(DecisionModelInfo)
     report.require(
         not missing,
         f"the browser client reads decision model fields the core does not provide: {sorted(missing)}",
     )
 
     clarification_fields = ts_interface_fields(source, "Clarification")
-    missing = clarification_fields - set(Clarification.model_fields)
+    missing = clarification_fields - model_field_names(Clarification)
     report.require(
         not missing,
         f"the browser client reads clarification fields the core does not provide: {sorted(missing)}",
     )
 
     event_fields = ts_interface_fields(source, "ProgressEvent")
-    missing = event_fields - set(Event.model_fields)
+    missing = event_fields - model_field_names(Event)
     report.require(
         not missing,
         f"the browser client reads event fields the core does not provide: {sorted(missing)}",

@@ -116,13 +116,34 @@ def test_laya_reports_its_absence_without_raising() -> None:
 
 
 def test_lava_enforces_a_timeout() -> None:
-    model = LayaDecisionModel(timeout_seconds=0.2)
+    model = LayaDecisionModel(timeout_seconds=0.2, first_call_timeout_seconds=0.2)
 
     class SlowRouter:
         def predict(self, *args, **kwargs):  # noqa: ANN002, ANN003
             time.sleep(3)
             return {}
 
+    with pytest.raises(ModelTimeout):
+        model._predict_with_timeout(SlowRouter(), "hello", {})
+
+
+def test_a_cold_start_gets_its_own_time_budget() -> None:
+    """Building the checkpoint is slower than an inference.
+
+    The first call must not be reported as a model timeout, and the calls
+    after it must use the regular budget.
+    """
+    model = LayaDecisionModel(timeout_seconds=0.2, first_call_timeout_seconds=60.0)
+
+    class SlowRouter:
+        def predict(self, *args, **kwargs):  # noqa: ANN002, ANN003
+            time.sleep(0.5)
+            return {"answers": {}}
+
+    # The first call uses the long budget, so it does not time out.
+    model._predict_with_timeout(SlowRouter(), "hello", {})
+
+    # A later call uses the short budget.
     with pytest.raises(ModelTimeout):
         model._predict_with_timeout(SlowRouter(), "hello", {})
 
