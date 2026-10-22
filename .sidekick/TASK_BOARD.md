@@ -18,6 +18,7 @@ A task is not `MERGED` until the real merge commit exists on the remote base. A 
 | ID | Phase | Task | Owner | Status | Depends on | Acceptance criteria |
 |---|---|---|---|---|---|---|
 | A1-BOOT | 0 | Repository audit + team protocol / bootstrap PR | Agent 1 | MERGED | — | `.sidekick/` coordination files created and present on `main` (commit `1b80a0d`). *Note: pushed directly to `main` before the PR-only rule could be applied - no PR exists for it.* |
+<<<<<<< HEAD
 | A1-CONTRACT | 1 | Document + implement minimal request/action contract + first vertical slice | Agent 1 | MERGED | A1-BOOT | Contract schemas v1 implemented in `sidekick/core/schemas.py`; HTTP surface in `sidekick/api/app.py`; real vertical slice; automated tests. Merged in #7 |
 | A1-BRAIN | 2 | Intent / session / correction / orchestration behind contracts | Agent 1 | MERGED | A1-CONTRACT | Correction (pre-exec + in-flight), multi-action, session isolation, safety policy, model/fallback observability. Merged in #7, #9, #11 |
 | A1-MODEL | 2 | Real decision model integration + honest provenance | Agent 1 | MERGED | A1-CONTRACT | `convaiinnovations/laya` wired in with lazy load, two time budgets, invalid-output handling and observable fallback; measured with `scripts/eval_laya.py` |
@@ -30,55 +31,22 @@ A task is not `MERGED` until the real merge commit exists on the remote base. A 
 | A2-AUDIT | 0 | Read-only execution/integration prerequisites inventory | Agent 2 | MERGED | — | `docs/execution-prerequisites-audit.md` (PR #4) |
 | A3-AUDIT | 0 | Read-only UI/voice/media prerequisites inventory | Agent 3 | MERGED | — | `web/docs/PREREQUISITES.md` (PR #1) |
 | A4-RULES | 0 | Verify current official hackathon rules; start test/CI plan | Agent 4 | READY | — | Source URLs, date checked, requirement text saved in repo |
-| A2-EXEC | 2 | Real execution + integration adapters | Agent 2 | IN_REVIEW | A1-CONTRACT | Implemented on `agent2/core-integration`; the provider credential is still missing |
+| A2-EXEC | 2 | Real execution + integration adapters | Agent 2 | MERGED | A1-CONTRACT | Implemented on `agent2/core-integration` |
 | A3-UI | 3 | Design system + real voice/UI foundations | Agent 3 | IN_REVIEW | A1-CONTRACT | PR #1; the client capability declaration in `sidekick/client_capabilities.json` is Agent 3's to fill in |
 | A4-CI | 2 | CI, contract tests, merge gate | Agent 4 | READY | A1-CONTRACT | The test command is `python -m pytest` (no network, no model weights needed) |
 
-
 ## Next task
 
-PR #13 (Agent 1) - the capability reality audit, the routing hardening, the
-packaging check, the client trust boundary and the voice-first developer flow.
-It is open and green:
+PR #13 (Agent 1) merged; PR #4 (Agent 2) merged; PR #1 (Agent 3) next.
 
 - `python -m pytest` -> 198 passed, 7 skipped
-- `python scripts/verify_backend.py` -> 20/20 against a real uvicorn server
-  with the real model
+- `python scripts/verify_backend.py` -> 20/20 against a real uvicorn server with the real model
 - `python scripts/check_contract_compat.py` -> OK (11 checks)
 - `python scripts/check_packaging.py --build` -> OK (a real wheel)
 
-It needs the merge gate, not more work from me.
+**Coding provider status:** A1-CODECRED needs `SIDEKICK_LLM_API_KEY` for a remote OpenAI-compatible endpoint (nothing is installed on the user's machine) or an authorized coding CLI. The acceptance test is Agent 2's `python scripts/live_provider_acceptance.py`: exit `0` means a live provider fixed a real bug and the project's real test command passed; exit `2` means blocked.
 
-**Merge order:** PR #13 first, then PR #4. The conflict between them resolves
-by taking PR #13's side - it already contains PR #4's behaviour (the execution
-adapter registration and the adapter's own `capability_status()`).
-
-**After that:** A1-CODECRED, which is blocked on a human. Set
-`SIDEKICK_LLM_API_KEY` for a remote OpenAI-compatible endpoint (nothing is
-installed on the user's machine) or install an authorized coding CLI. The
-acceptance test is Agent 2's `python scripts/live_provider_acceptance.py`:
-exit `0` means a live provider fixed a real bug and the project's real test
-command passed; exit `2` means blocked.
-
-Not started, and deliberately so: durable session storage (a restart still
-loses the conversation), a notification channel for the reminders, and the
-travel / food / Alexa+ / AWS work - each needs a provider, an account or a
-policy that does not exist yet.
-
-## Open integration questions (asked, with the request in the PR)
-
-- **Agent 3** (PR #1): the argument names and the result payload for
-  `media.play`, `movie.play` and `game.start`, and whether the shipped aliases
-  in `sidekick/client_capabilities.json` should change. The file is theirs.
-  Asked twice; no answer yet. The core works without it (the default
-  arguments and the `awaiting_client` result are already in place), so this
-  is not blocking.
-- **Agent 2** (PR #4): the argument names `coding.execute` needs from an
-  utterance (today: `task` and a quoted `workspace`), and the result payload
-  the core should build a spoken line from. Asked twice; no answer yet. The
-  core does not need it to route and approve the action.
-
-## Open gaps (Agent 1, after the A1-REALITY merge)
+## Open gaps
 
 - The confirmation flow is exposed over HTTP but the *voice* confirmation ("yes", "no") is currently
   only reachable as a control verb in the utterance; Agent 3 should send the explicit

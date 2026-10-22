@@ -30,6 +30,7 @@ from .core.registry import ToolRegistry
 from .core.safety import SafetyPolicy
 from .core.schemas import RiskLevel
 from .core.sessions import SessionStore
+from .tools.execution import ExecutionServiceAdapter
 from .tools.local import (
     MediaOpenTool,
     NoteReadTool,
@@ -74,11 +75,9 @@ def build_registry(
     registry.register(WebSearchTool())
     registry.register(ReminderSetTool())
 
-    # The execution service adapter lives in its own module (Agent 2). The
-    # core works without it, and picks it up as soon as it is there.
     try:
         from .tools.execution import ExecutionServiceAdapter
-    except ImportError:  # pragma: no cover - the adapter is not present yet
+    except ImportError:  # pragma: no cover
         ExecutionServiceAdapter = None  # type: ignore[assignment]
 
     if ExecutionServiceAdapter is not None:

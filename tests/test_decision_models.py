@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import importlib.util
 import time
 
 import pytest
@@ -108,11 +109,14 @@ def test_a_model_that_is_not_confident_uses_the_deterministic_second_opinion(
 def test_laya_reports_its_absence_without_raising() -> None:
     model = LayaDecisionModel()
 
-    # The package is installed in this environment, so the check must be
-    # truthful in both directions.
-    assert model.available is True
+    # The package may or may not be installed on the machine that runs the
+    # suite: it needs torch and a checkpoint, so it is an optional extra.
+    # The availability check must be truthful in *both* directions, and it
+    # must never raise.
+    installed = importlib.util.find_spec("laya") is not None
+    assert model.available is installed
     model.model = "definitely-not-installed"
-    assert LayaDecisionModel(model_id="x").available is True
+    assert LayaDecisionModel(model_id="x").available is installed
 
 
 def test_lava_enforces_a_timeout() -> None:
