@@ -39,6 +39,9 @@ export const ENDPOINTS = {
   /** Cancel a pending or running action. */
   cancel: (actionId: string) =>
     pick('VITE_SIDECKICK_CANCEL_PATH', '/api/v1/actions/:id/cancel').replace(':id', actionId),
+  /** Report completion of a client-executed action. */
+  complete: (actionId: string) =>
+    pick('VITE_SIDECKICK_COMPLETE_PATH', '/api/v1/actions/:id/complete').replace(':id', actionId),
 } as const
 
 /**

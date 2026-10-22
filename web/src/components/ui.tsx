@@ -25,6 +25,7 @@ const STATE_LABEL: Record<CapabilityState, string> = {
   unavailable: 'unavailable',
   unconfigured: 'not configured',
   disconnected: 'disconnected',
+  client: 'client',
 }
 
 export function StateBadge({ state, detail }: { state: CapabilityState; detail?: string }) {

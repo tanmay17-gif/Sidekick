@@ -12,6 +12,7 @@ const TONE_BY_STATE = {
   unavailable: 'unavailable',
   unconfigured: 'confirm',
   disconnected: 'danger',
+  client: 'live',
 } as const
 
 /**

@@ -221,6 +221,7 @@ export type CapabilityState =
   | 'unavailable'
   | 'unconfigured'
   | 'disconnected'
+  | 'client'
 
 export interface Capability {
   id: string

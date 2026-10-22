@@ -378,6 +378,15 @@ def create_app(engine: DecisionEngine | None = None) -> FastAPI:
         action = engine.cancel_action(session_id, action_id)
         return {"action": action.model_dump(mode="json")}
 
+    from .alexa import AlexaAdapter
+    alexa_adapter = AlexaAdapter(engine)
+
+    @app.post("/api/v1/alexa")
+    @app.post("/v1/alexa")
+    async def alexa_request(payload: dict[str, Any] = Body(...)) -> dict[str, Any]:
+        """Alexa Skills Kit (ASK) HTTP interface for voice interaction."""
+        return alexa_adapter.handle(payload)
+
     @app.get("/")
     async def index() -> Any:
         # The built browser client wins over the placeholder page.

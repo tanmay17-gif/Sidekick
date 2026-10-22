@@ -23,6 +23,7 @@ from .core.catalog import (
     ToolSpec,
 )
 from .core.decision import DecisionModel
+from .core.decisions.bedrock_model import BedrockDecisionModel
 from .core.decisions.laya_model import LayaDecisionModel
 from .core.decisions.rule_model import RuleDecisionModel
 from .core.engine import DecisionEngine
@@ -157,15 +158,30 @@ def _client_spec(entry: dict, owner: str) -> ToolSpec:
 def build_decision_model(prefer_model: str | None = None) -> tuple[DecisionModel, DecisionModel, str]:
     """Return ``(primary, fallback, reason)``.
 
-    ``prefer_model`` may force a specific provider (``"laya"`` or ``"rule"``);
-    by default the real model is used when it is installed.
+    ``prefer_model`` may force a specific provider (``"bedrock"``, ``"laya"`` or ``"rule"``);
+    by default the real model is used when it is installed/configured.
     """
-    choice = (prefer_model or os.environ.get("SIDEKICK_DECISION_MODEL") or "auto").lower()
+    choice = (
+        prefer_model
+        or os.environ.get("SIDEKICK_DECISION_MODEL")
+        or os.environ.get("INTENT_MODEL_PROVIDER")
+        or "auto"
+    ).lower()
 
     if choice == "rule":
         rule = RuleDecisionModel()
         rule.fallback_reason = "the decision model was disabled by configuration"
         return rule, RuleDecisionModel(), rule.fallback_reason
+
+    if choice in ("bedrock", "aws-bedrock") or (choice == "auto" and os.environ.get("BEDROCK_MODEL_ID")):
+        bedrock = BedrockDecisionModel()
+        if bedrock.available:
+            return bedrock, RuleDecisionModel(), ""
+        if choice != "auto":
+            rule = RuleDecisionModel()
+            reason = "AWS Bedrock credentials/region are not configured"
+            rule.fallback_reason = reason
+            return rule, RuleDecisionModel(), reason
 
     laya = LayaDecisionModel()
     if laya.available:

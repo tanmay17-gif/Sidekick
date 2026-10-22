@@ -203,6 +203,29 @@ export class SidekickClient {
     return this.readActionEnvelope(response)
   }
 
+  /** Report the outcome of a client-executed capability. */
+  async completeAction(
+    actionId: string,
+    sessionId: string,
+    status: 'succeeded' | 'failed' | 'cancelled',
+    result?: Record<string, unknown> | null,
+    error?: { code?: string; message?: string; retryable?: boolean; details?: unknown } | null,
+    signal?: AbortSignal,
+  ): Promise<ActionEnvelope> {
+    const body: Record<string, unknown> = {
+      session_id: sessionId,
+      status,
+      result: result ?? {},
+    }
+    if (error) body.error = error
+    const response = await this.request(ENDPOINTS.complete(actionId), {
+      method: 'POST',
+      body: JSON.stringify(body),
+      signal,
+    })
+    return this.readActionEnvelope(response)
+  }
+
   /** Re-read one action and its events - used to refresh after a change. */
   async actionState(
     actionId: string,
