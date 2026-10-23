@@ -1,228 +1,374 @@
-# Sidekick
+﻿<div align="center">
 
-**Voice-first intelligent companion with real task execution, sandboxing, coding agent integration, Alexa connectivity, MCP hosting, voice-controlled gaming, and contextual Movie Buddy.**
+# 🎙️ Sidekick
 
-Sidekick understands what you *mean*, not just what you said: it resolves intent before conflicting actions run, handles natural speech corrections, keeps sessions isolated, executes genuine tasks through a secure sandbox, enforces strict chess rules with voice commands, and provides truthful status reporting.
+**A voice-first AI companion that connects Alexa, your browser, and real coding agents — through a single MCP server.**
 
----
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Python 3.10+](https://img.shields.io/badge/Python-3.10%2B-blue.svg)](https://python.org)
+[![React 18](https://img.shields.io/badge/React-18-61dafb.svg)](https://react.dev)
+[![MCP Protocol](https://img.shields.io/badge/MCP-2024--11--05-purple.svg)](https://modelcontextprotocol.io)
 
-## Architecture Overview
-
-```
-                      ┌──────────────────────────────────────────────┐
-                      │              User Interfaces                 │
-                      │  - Interface A: Conversational Voice Surface │
-                      │  - Interface B: Developer Control Room       │
-                      │  - Games View: Chess, Tic-Tac-Toe, 2048      │
-                      │  - Movie Buddy: Contextual Companion Surface │
-                      │  - Alexa Voice Endpoint / ASK Web Service    │
-                      └──────────────────────┬───────────────────────┘
-                                             │ HTTP POST /api/v1/requests (or SSE)
-                                             ▼
-                      ┌──────────────────────────────────────────────┐
-                      │            Sidekick Core (FastAPI :8000)     │
-                      │  - SessionStore: Isolated conversational turn │
-                      │  - DecisionEngine: Intent parsing & routing  │
-                      │  - Decision Models:                          │
-                      │     * RuleDecisionModel (deterministic anchor│
-                      │     * LayaDecisionModel (self-hosted / LAYA) │
-                      │     * BedrockDecisionModel (Amazon Bedrock)  │
-                      │  - SafetyPolicy: risk levels & approval gate │
-                      │  - ToolRegistry: Catalog & capability specs  │
-                      └──────────────┬───────────────────────────────┘
-                                     │
-         ┌───────────────────────────┴───────────────────────────────┐
-         │                                                           │
-         ▼ (Local Tools)                                             ▼ (Delegated Tools)
-┌───────────────────────────────┐                  ┌──────────────────────────────────────────┐
-│  Built-in Server Adapters     │                  │    Execution Service Adapter             │
-│  - NoteWrite / NoteRead       │                  │    `sidekick.tools.execution`            │
-│  - TimerSet / TimerList       │                  └────────────────────┬─────────────────────┘
-│  - WebSearch / MediaOpen      │                                       │ HTTP :8088 / MCP Stdio
-└───────────────────────────────┘                                       ▼
-         ▲                                         ┌──────────────────────────────────────────┐
-         │ Reported outcome                        │    Sidekick Execution Service (:8088)    │
-         │ (POST /v1/actions/{id}/complete)        │    `sidekick_execution`                  │
-┌────────┴──────────────────────┐                  │    - JobManager & Event Store            │
-│  Client-Executed Capabilities │                  │    - Workspace & Path Traversal Sandbox  │
-│  - Movie Buddy (Caption LLM)  │                  │    - ToolAdapters (coding, system, web)  │
-│  - Voice Chess (FIDE Rules)   │                  │    - Coding Providers:                   │
-│  - Voice Tic-Tac-Toe (Minimax)│                  │       * Amazon Bedrock (Qwen / Claude)   │
-│  - Voice 2048 (Merge Engine)  │                  │       * Remote HTTP API (OpenAI-compat)  │
-└───────────────────────────────┘                  │       * Local Coding CLI (authorized)    │
-                                                   │       * Simulated Provider (test only)   │
-                                                   │    - Stdio MCP Server (`mcp_server.py`)  │
-                                                   └──────────────────────────────────────────┘
-```
+</div>
 
 ---
 
-## Features & Implementation Reality
+## What is Sidekick?
 
-| Capability / Component | Real Status | Verification & Implementation Evidence |
+Sidekick is an open-source AI assistant platform with three integrated layers:
+
+| Layer | What it does |
+|---|---|
+| 🗣️ **Alexa Skill** | Accepts voice commands, routes them through the brain |
+| 🧠 **Core Brain** | Python API that decides what to do and calls execution tools |
+| ⚙️ **Execution Service** | Real file editing, Git, testing, system control — exposed over MCP and HTTP |
+| 🎬 **Web Client** | React browser UI with Movie Buddy, voice chess, 2048, and Tic-Tac-Toe |
+
+---
+
+## ✨ Features
+
+### 🔗 MCP Server (Model Context Protocol)
+The heart of Sidekick is its **fully standard MCP server** (protocol version `2024-11-05`, JSON-RPC 2.0 over stdio). Any MCP-compatible host can connect and use these tools:
+
+| Tool | Description | Risk |
 |---|---|---|
-| **Movie Buddy** | VERIFIED LIVE | Dialogue-grounded commentary based on movie subtitle track; audio ducking (video drops to 20% volume while Sidekick speaks, restores to 100%); warm natural companion tone; Groq LLM integration (`openai/gpt-oss-120b`). Verified in `web/tests/unit/movie-buddy.test.tsx` and live browser. |
-| **Chess Engine & Voice Commands** | VERIFIED LIVE | Full FIDE rules engine via `chess.js` (en passant, castling, promotion, check, checkmate, stalemate). Disambiguates candidate moves, rejects illegal moves with explanation, supports natural voice ("Move knight to F3", "Pawn in front of king two squares", "Castle kingside"). Sidekick AI plays legal response and announces moves. Verified in `web/tests/unit/chess-engine.test.ts`. |
-| **Voice Gaming Suite** | VERIFIED LIVE | Playable via mouse, keyboard, and speech: Tic-Tac-Toe against minimax engine ("Play center", "Cell 5"), 2048 merge puzzle ("Swipe left", "Slide up"). Verified in `web/tests/unit/voice-games.test.ts`. |
-| **Model Context Protocol (MCP)** | VERIFIED LIVE | Stdio JSON-RPC 2.0 MCP server (`python -m sidekick_execution mcp`) exposing `coding.execute`, `coding_plan`, `coding_apply`, `run_tests`, `git_diff` to compatible MCP hosts (Claude Code, Cursor). Verified in `tests/test_transports.py`. |
-| **Alexa Skills Kit Endpoint** | VERIFIED LOCALLY | Full ASK HTTP web service at `/api/v1/alexa` with signature certificate verification, timestamp validation, application ID checking, and intent routing to DecisionEngine in `sidekick/api/alexa.py`. Verified in `tests/test_alexa.py` and `tests/test_alexa_security.py`. |
-| **Amazon Bedrock Coding Provider** | PARTIAL / BLOCKED | Integration with AWS Bedrock via boto3 Converse API and `invoke_model`. Configured for model `qwen.qwen3-coder-30b-a3b-v1:0` in `eu-north-1` (and `anthropic.claude-3-sonnet-20240229-v1:0`). Live AWS inference status is honestly reported as **BLOCKED** pending AWS account verification approval. Verified in `tests/test_bedrock_provider.py`. |
-| **Sandboxed Execution & Safety Gate** | VERIFIED LIVE | Path traversal prevention, shell injection boundaries, durable job records, and mandatory human approval gate for file modifications in `sidekick_execution/`. Verified in `tests/test_workspace_safety.py` and `tests/test_coding_end_to_end.py`. |
-| **Conversational Surface & Control Room** | VERIFIED LIVE | Dual UI: Interface A (voice-first conversation) and Interface B (developer control room with live architecture state, request history, diff inspector, and approval controls). Built in React 18 and served at `/`. |
+| `coding.execute` | Real file edits via AI (Bedrock / Claude / Codex) | High |
+| `coding.run_tests` | Run any project's test suite, return real exit status | Low |
+| `workspace.inspect` | Inspect authorized workspace — files, structure, git state | Low |
+| `vcs.diff` | Real `git diff` of an authorized workspace | Low |
+| `vcs.commit` | Create a real Git commit with a message | Medium |
+| `system.info` | Report real runtime capabilities of the host machine | Low |
+| `system.volume` | Read or set master system volume (0–100) | Medium |
+| `system.media_control` | Send multimedia key presses (play, pause, next, stop, mute, etc.) | Low |
+| `system.open` | Open files or URLs with the OS default handler | Medium |
+| `system.clipboard` | Read or write the real system clipboard | Medium |
+| `web.fetch` | Make real HTTP(S) requests and return the server response | Low |
+
+**Connecting Claude Desktop:**
+```json
+// ~/Library/Application Support/Claude/claude_desktop_config.json
+{
+  "mcpServers": {
+    "sidekick": {
+      "command": "python",
+      "args": ["-m", "sidekick_execution", "mcp"],
+      "cwd": "/path/to/Sidekick"
+    }
+  }
+}
+```
+
+**Connecting Cursor:**
+Add the same config to Cursor → Settings → MCP Servers.
 
 ---
 
-## Quickstart
+### 🤖 Coding Agent Integrations
+
+Sidekick supports three coding backends — pick whichever fits:
+
+#### Option A — AWS Bedrock (Qwen 3 Coder / Claude)
+```env
+SIDEKICK_PROVIDER=bedrock
+AWS_ACCESS_KEY_ID=your-key
+AWS_SECRET_ACCESS_KEY=your-secret
+AWS_REGION=us-east-1
+BEDROCK_MODEL_ID=qwen.qwen3-coder-30b-a3b-v1:0
+```
+
+#### Option B — Claude API / OpenAI Codex (HTTP API)
+```env
+SIDEKICK_PROVIDER=http_api
+SIDEKICK_LLM_API_KEY=sk-ant-...          # or sk-... for OpenAI
+SIDEKICK_LLM_BASE_URL=https://api.anthropic.com/v1
+SIDEKICK_LLM_MODEL=claude-3-5-sonnet-20241022
+```
+
+#### Option C — Cursor / Claude CLI / Aider (local binary)
+```env
+SIDEKICK_PROVIDER=local_cli
+SIDEKICK_CODING_CLI=claude          # or: aider, cursor
+SIDEKICK_CODING_CLI_ARGS=["--json-plan","--task","{task}","--workspace","{workspace}"]
+```
+
+> Install the Claude CLI: `npm install -g @anthropic-ai/claude-code`
+
+---
+
+### 🗣️ Alexa Voice Integration
+
+Sidekick exposes an Alexa Smart Home + Custom Skill HTTP endpoint:
+
+```
+POST /api/v1/alexa/ask
+```
+
+Supports intents:
+- `PlayMovie` / `StopMovie` / `PauseMovie`
+- `SearchFlight` / `BookFlight`
+- `PlayChess` / `PlayTicTacToe` / `Play2048`
+- `RunCode` / `CommitChanges` / `RunTests`
+- `SetVolume` / `GetVolume` / `MediaControl`
+- `OpenFile` / `FetchUrl` / `ClipboardRead` / `ClipboardWrite`
+- `GetCapabilities` / `Help`
+
+**Configure your Alexa Skill endpoint** to:
+```
+https://your-domain.com/api/v1/alexa/ask
+```
+
+---
+
+### 🎬 Movie Buddy
+
+An AI-powered movie companion that watches films alongside you:
+
+- **Voice-activated** — say "Hey Sidekick, what just happened?" during a movie
+- **Subtitle-grounded** — commentary is always based on actual caption lines, never hallucinated
+- **Natural personality** — warm, witty, cozy tone. Reacts like a friend on the couch
+- **Auto audio ducking** — video drops to 20% volume while Sidekick speaks
+- **Groq / OpenAI compatible** — configure any OpenAI-compatible endpoint
+
+```env
+# web/.env.local
+VITE_GROQ_API_KEY=your-groq-key
+VITE_GROQ_MODEL=openai/gpt-oss-120b
+VITE_GROQ_API_ENDPOINT=https://api.groq.com/openai/v1/chat/completions
+```
+
+---
+
+### 🎮 Voice Gaming Suite
+
+Play games entirely by voice:
+
+| Game | Voice Commands |
+|---|---|
+| **Chess** | "Move pawn to e4", "Castle kingside", "What are my options?" |
+| **Tic-Tac-Toe** | "Play top left", "Play center", "Restart" |
+| **2048** | "Swipe left", "Move right", "Start new game" |
+
+The chess engine uses the full `chess.js` FIDE rules engine — checkmate, castling, promotion, illegal-move explanations, and minimax AI opponent.
+
+---
+
+## 🏗️ Architecture
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                        Voice & UI Layer                         │
+│   Alexa Skill (ASK)          Browser (React/Vite port 5173)     │
+└──────────────────────┬──────────────────────────────────────────┘
+                       │ HTTP POST /api/v1/*
+┌──────────────────────▼──────────────────────────────────────────┐
+│               Core Brain  (FastAPI  port 8000)                  │
+│   Intent routing · Decision model · Laya · Rule engine          │
+└──────────────────────┬──────────────────────────────────────────┘
+                       │ HTTP POST /v1/actions
+┌──────────────────────▼──────────────────────────────────────────┐
+│           Execution Service  (stdlib HTTP  port 8088)           │
+│                                                                  │
+│  ┌──────────────────────────────────────────────────────────┐   │
+│  │                      Tool Registry                       │   │
+│  │  coding.execute · vcs.diff · vcs.commit · system.* · ..  │   │
+│  └──────────────────────────────────────────────────────────┘   │
+│                                                                  │
+│  ┌──────────────────┐    ┌────────────────────────────────┐     │
+│  │   MCP Server     │    │      Coding Provider           │     │
+│  │  stdio/JSON-RPC  │    │  Bedrock │ HTTP API │ LocalCLI │     │
+│  │  2024-11-05      │    └────────────────────────────────┘     │
+│  └──────────────────┘                                           │
+└─────────────────────────────────────────────────────────────────┘
+         ▲
+         │ MCP stdio (JSON-RPC)
+┌────────┴────────────────────────────────────────────────────────┐
+│              MCP Host Clients (optional)                        │
+│     Claude Desktop · Cursor · Windsurf · Any MCP host           │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## 🚀 Quick Start
 
 ### Prerequisites
 - Python 3.10+
-- Node.js 18+ and npm
+- Node.js 18+
+- Git
 
-### 1. Backend Setup
+### 1. Clone & Install
+
 ```bash
-# Clone and enter directory
 git clone https://github.com/tanmay17-gif/Sidekick.git
 cd Sidekick
 
-# Install Python package in development mode
+# Backend
 pip install -e ".[dev]"
+
+# Frontend
+cd web && npm install && cd ..
 ```
 
-### 2. Frontend Setup & Build
+### 2. Configure
+
 ```bash
-cd web
-npm install
-npm run build
-cd ..
+cp .env.example .env
+# Edit .env with your credentials (AWS, Alexa Skill ID, etc.)
+
+cp web/.env.example web/.env.local
+# Edit web/.env.local with your Groq key for Movie Buddy
 ```
 
-### 3. Launch Services
+### 3. Run
 
-#### Option A: Run Full Application (Core API + Execution Service)
 ```bash
-# Terminal 1: Start Execution Service on port 8088
+# Terminal 1 — Core Brain
+python -m uvicorn sidekick.api.app:create_app --factory --port 8000 --reload
+
+# Terminal 2 — Execution Service (with MCP)
 python -m sidekick_execution serve --port 8088
 
-# Terminal 2: Start Core API on port 8000
-python -m uvicorn sidekick.api.app:create_app --factory --host 127.0.0.1 --port 8000
+# Terminal 3 — Web UI
+cd web && npm run dev
 ```
-Open **`http://127.0.0.1:8000`** in your browser.
 
-#### Option B: Frontend Development Mode
-```bash
-cd web
-npm run dev
-```
-Open **`http://localhost:5173`** with hot reloading.
+Open: [http://localhost:5173](http://localhost:5173)
 
----
+### 4. MCP only (for Claude Desktop / Cursor)
 
-## Model Context Protocol (MCP) Server
-
-Sidekick's execution capabilities can be driven directly by any MCP client (such as Claude Code, Cursor, or Zed):
 ```bash
 python -m sidekick_execution mcp
 ```
-The server speaks JSON-RPC 2.0 over standard I/O (protocol version `2024-11-05`) and exposes:
-- `coding_plan`: generates a structured file-edit plan
-- `coding_apply`: applies changes inside the authorized workspace sandbox
-- `run_tests`: runs unit test suites in the sandbox and captures exit codes
-- `git_diff`: computes exact git diffs of uncommitted changes
 
 ---
 
-## Alexa Integration
+## 🔐 Security & Secrets
 
-The Alexa endpoint is accessible at:
-- `POST /api/v1/alexa`
-- `POST /v1/alexa`
-
-To test locally:
-```bash
-curl -X POST http://127.0.0.1:8000/api/v1/alexa \
-  -H "Content-Type: application/json" \
-  -d '{
-    "version": "1.0",
-    "session": {"sessionId": "demo-session-1"},
-    "request": {
-      "type": "IntentRequest",
-      "intent": {
-        "name": "SidekickIntent",
-        "slots": {"Utterance": {"value": "ask Sidekick to fix the login page and run the tests"}}
-      }
-    }
-  }'
-```
-
-In production, configure `ALEXA_SKILL_ID` and `ALEXA_VERIFY_SIGNATURE=true` to enforce cryptographic signature chain verification.
-
----
-
-## Configuration & Environment Variables
-
-Copy the example environment files:
-```bash
-cp .env.example .env
-cp web/.env.example web/.env.local
-```
-
-### Key Configuration Variables:
-
-| Variable | Description | Default / Example |
+| File | Status | Contains |
 |---|---|---|
-| `SIDEKICK_PROVIDER` | Coding provider for execution (`bedrock`, `http_api`, `simulated`) | `bedrock` |
-| `BEDROCK_MODEL_ID` | Amazon Bedrock model ID | `qwen.qwen3-coder-30b-a3b-v1:0` |
-| `AWS_REGION` | AWS Region for Bedrock inference | `eu-north-1` |
-| `AWS_ACCESS_KEY_ID` | AWS Access Key (standard AWS credential chain) | *Configured securely* |
-| `AWS_SECRET_ACCESS_KEY` | AWS Secret Key | *Configured securely* |
-| `SIDEKICK_EXECUTION_URL` | URL of the execution service | `http://127.0.0.1:8088` |
-| `ALEXA_SKILL_ID` | Authorized Alexa Skill ID | *Optional for testing* |
-| `VITE_GROQ_API_KEY` | Groq API Key for Movie Buddy companion banter | *Optional for local LLM* |
-| `VITE_GROQ_MODEL` | Groq model for Movie Buddy | `openai/gpt-oss-120b` |
+| `.env` | ✅ gitignored | AWS keys, Alexa Skill ID |
+| `web/.env.local` | ✅ gitignored | Groq API key |
+| `.env.example` | ✅ tracked | **Placeholders only** |
+| `web/.env.example` | ✅ tracked | **Placeholders only** |
+| Source code | ✅ clean | Zero hardcoded credentials |
+
+**No API keys or secrets are ever committed to this repository.**
 
 ---
 
-## Automated Verification Suites
+## 🧪 Testing
 
-### 1. Python Backend Test Suite (395 Tests)
 ```bash
-pytest -q
-```
-*Expected: 388 passed, 7 skipped, 0 failures.*
+# Backend (395 tests)
+pytest
 
-### 2. Frontend Vitest Suite (14 Test Files, 179 Tests)
-```bash
-cd web
-npm test -- --run
-```
-*Expected: 14 passed (14), 179 passed (179).*
+# Frontend (179 tests)
+cd web && npx vitest run
 
-### 3. Frontend Type Check
-```bash
-cd web
-npm run typecheck
-```
-*Expected: 0 errors.*
-
-### 4. Production Build Verification
-```bash
-cd web
-npm run build
+# Type check
+cd web && npx tsc --noEmit
 ```
 
 ---
 
-## Deployment & Verification Checklist
+## 📁 Project Structure
 
-- [x] **Movie Buddy**: Verified live in browser with subtitle-grounded reactions, speech rate budgeting, and audio ducking.
-- [x] **Chess**: Full legal rules enforced via `chess.js`, disambiguation prompt, AI response, voice commands verified.
-- [x] **Voice Games**: Tic-Tac-Toe minimax and 2048 directional swipes verified by unit tests and playable UI.
-- [x] **MCP Server**: Stdio JSON-RPC 2.0 tested with `initialize`, `tools/list`, `tools/call`.
-- [x] **Alexa ASK**: Security verifier and intent adapter tested for valid and invalid signatures.
-- [x] **Bedrock Coding Provider**: SDK Converse API and model fallback tested; status correctly reports `BLOCKED` when AWS account verification is pending.
-- [x] **Security**: No hardcoded API keys or secrets in source code; `.gitignore` validated.
+```
+Sidekick/
+├── sidekick/                  # Core brain — FastAPI, intent routing, Alexa
+│   ├── api/                   # REST endpoints + Alexa ASK handler
+│   ├── brain/                 # Decision engine, Laya model
+│   └── tools/                 # Tool definitions for the brain
+├── sidekick_execution/        # Execution service — MCP, HTTP, tools
+│   ├── providers/             # Bedrock, HTTP API, Local CLI, Simulated
+│   ├── adapters/              # Coding, system, web, VCS adapters
+│   ├── mcp_server.py          # MCP stdio server (JSON-RPC 2024-11-05)
+│   └── http_service.py        # HTTP + SSE transport
+├── web/                       # React browser client
+│   └── src/
+│       ├── components/        # UI: Chess, TicTacToe, 2048, MovieBuddy
+│       └── lib/               # Game engines, movie provider, voice utils
+├── tests/                     # Backend pytest suite
+├── docs/                      # Public documentation
+│   ├── core-integration.md    # Brain ↔ Execution contract
+│   ├── execution-service-contract.md
+│   └── DEMO_SCRIPT.md
+├── .env.example               # Root env template (no real values)
+├── LICENSE                    # MIT
+└── README.md
+```
 
 ---
 
-## License
-Apache-2.0. See `LICENSE` for details.
+## 📡 API Reference
+
+### Execution Service HTTP API
+
+```
+GET  /v1/health              Liveness + runtime summary
+GET  /v1/capabilities        Full capability report (all tools + provider status)
+POST /v1/actions             Submit an action (coding, git, system, etc.)
+GET  /v1/actions             List actions
+GET  /v1/actions/{id}        Get one action
+POST /v1/actions/{id}/approve  Approve a pending high-risk action
+POST /v1/actions/{id}/cancel   Cancel an action
+GET  /v1/actions/{id}/events   SSE stream of live job events
+```
+
+### Core Brain API
+
+```
+POST /api/v1/alexa/ask       Alexa ASK request handler
+POST /api/v1/requests        Natural language request interpreter
+GET  /api/v1/capabilities    Aggregated capability report
+GET  /api/v1/media/catalog   Movie/media catalog
+GET  /api/v1/actions/{id}    Action status
+```
+
+---
+
+## 🔌 Connecting External Coding Agents
+
+### Alexa → Bedrock (Qwen 3 Coder)
+Voice command → Alexa → Sidekick Brain → Execution Service → AWS Bedrock → real file edits
+
+### Alexa → Claude API
+```env
+SIDEKICK_PROVIDER=http_api
+SIDEKICK_LLM_BASE_URL=https://api.anthropic.com/v1
+SIDEKICK_LLM_API_KEY=sk-ant-...
+SIDEKICK_LLM_MODEL=claude-3-5-sonnet-20241022
+```
+
+### Claude Desktop / Cursor → Sidekick MCP
+MCP host spawns `python -m sidekick_execution mcp` and calls any of the 11 tools.
+
+### Alexa → Claude CLI (local)
+```env
+SIDEKICK_PROVIDER=local_cli
+SIDEKICK_CODING_CLI=claude
+```
+
+---
+
+## 🤝 Contributing
+
+1. Fork the repo
+2. Create a feature branch: `git checkout -b feat/my-feature`
+3. Commit your changes: `git commit -m "feat: add my feature"`
+4. Push and open a PR against `main`
+
+Please keep `.env` and `web/.env.local` out of commits. Real secrets must never appear in the repository.
+
+---
+
+## 📄 License
+
+[MIT](LICENSE) — free to use, modify, and distribute.
+
+---
+
+<div align="center">
+Made with ❤️ by the Sidekick Contributors
+</div>

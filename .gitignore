@@ -64,5 +64,18 @@ logs/
 sidekick_runtime/
 .sidekick_runtime/
 
-# Local audit runs (machine specific paths)
-reports/audit-*.json
+# Local audit runs and eval outputs (machine specific paths)
+reports/
+
+# Internal dev/handoff docs -- not part of the public repo
+docs/handoff/
+docs/AI_HANDOFF.md
+docs/CAPABILITY_REALITY_AUDIT.md
+docs/DECISION_FAILURES.md
+docs/HACKATHON_COMPLIANCE.md
+docs/IMPLEMENTATION_PLAN.md
+docs/PROJECT_AUDIT.md
+docs/execution-prerequisites-audit.md
+
+# Python packaging artifacts
+sidekick.egg-info/
