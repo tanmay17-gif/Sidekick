@@ -406,7 +406,7 @@ This needs no provider account, so it is `REAL`. It is the capability behind
 
 | Method | Result |
 |---|---|
-| `initialize` | `{"protocolVersion": "2024-11-05", "capabilities": {"tools": {...}}, "serverInfo": {...}}` |
+| `initialize` | `{"protocolVersion": "2025-11-25", "capabilities": {"tools": {...}}, "serverInfo": {...}}` |
 | `notifications/initialized` | no response (it is a notification) |
 | `tools/list` | the same tools as §7, with `inputSchema` |
 | `tools/call` | `{"content": [{"type": "text", "text": "<json>"}], "isError": bool}` |
