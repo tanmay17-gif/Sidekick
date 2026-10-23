@@ -84,6 +84,9 @@ class ExecutionConfig:
             for r in os.environ.get("SIDEKICK_ALLOWED_ROOTS", "").split(os.pathsep)
             if r.strip()
         ]
+        if not roots:
+            import tempfile
+            roots = [str(Path.cwd().resolve()), tempfile.gettempdir()]
         return cls(
             allowed_roots=roots,
             disposable_root=os.environ.get("SIDEKICK_DISPOSABLE_ROOT") or None,

@@ -47,7 +47,7 @@ from ..core.schemas import Action, ActionError, RiskLevel
 
 DEFAULT_BASE_URL = "http://127.0.0.1:8088"
 DEFAULT_TIMEOUT_SECONDS = 30.0
-DEFAULT_HEALTH_TIMEOUT_SECONDS = 2.0
+DEFAULT_HEALTH_TIMEOUT_SECONDS = 5.0
 
 #: Status values the execution service reports for its tools.
 STATUS_REAL = "REAL"
@@ -81,6 +81,12 @@ class ExecutionServiceAdapter:
             "write code",
             "fix the bug",
             "fix the failing test",
+            "fix the failing tests",
+            "run the tests",
+            "run tests",
+            "test the code",
+            "fix the login page and run the tests",
+            "fix login and run tests",
             "code this",
             "make the change",
             "implement this",
@@ -138,7 +144,7 @@ class ExecutionServiceAdapter:
         timeout: float = DEFAULT_TIMEOUT_SECONDS,
         health_timeout: float = DEFAULT_HEALTH_TIMEOUT_SECONDS,
     ) -> None:
-        configured = base_url if base_url is not None else os.environ.get("SIDEKICK_EXECUTION_URL")
+        configured = base_url if base_url is not None else os.environ.get("SIDEKICK_EXECUTION_URL", DEFAULT_BASE_URL)
         self.base_url = (configured or "").rstrip("/")
         self.timeout = float(timeout)
         self.health_timeout = float(health_timeout)
@@ -182,7 +188,11 @@ class ExecutionServiceAdapter:
             }
         provider = capabilities.get("provider") or {}
         status = provider.get("status") or provider.get("level") or STATUS_REAL
-        detail = provider.get("reason") or provider.get("detail") or ""
+        detail_obj = provider.get("detail")
+        if isinstance(detail_obj, dict):
+            detail = detail_obj.get("hint") or detail_obj.get("reason") or provider.get("reason") or ""
+        else:
+            detail = str(detail_obj or provider.get("reason") or "")
         if status == STATUS_SIMULATED:
             return {
                 "status": STATUS_SIMULATED,

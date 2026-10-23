@@ -67,6 +67,18 @@ class BedrockCodingProviderTests(unittest.TestCase):
         self.assertIsInstance(provider, BedrockCodingProvider)
         self.assertEqual(provider.name, "bedrock")
 
+    def test_access_denied_reports_blocked_status(self) -> None:
+        mock_client = MagicMock()
+        mock_client.invoke_model.side_effect = Exception("AccessDeniedException: Account verification is pending.")
+        mock_client.converse = None
+
+        provider = BedrockCodingProvider(boto3_client=mock_client)
+        result = provider.plan(CodingRequest(task="fix bug", workspace="C:\\workspace"))
+        self.assertFalse(result.ok)
+        self.assertEqual(result.error.code, errors.PROVIDER_AUTH_FAILED)
+        self.assertEqual(result.status.reason, "blocked_by_aws")
+        self.assertIn("BLOCKED", result.status.detail.get("hint", ""))
+
 
 if __name__ == "__main__":
     unittest.main()

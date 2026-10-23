@@ -69,7 +69,7 @@ class ProviderConfig:
             )
             name = "auto"
 
-        api_key = (env.get("SIDEKICK_LLM_API_KEY") or "").strip()
+        api_key = (env.get("SIDEKICK_LLM_API_KEY") or env.get("OPENAI_API_KEY") or "").strip()
         base_url = (env.get("SIDEKICK_LLM_BASE_URL") or DEFAULT_BASE_URL).strip().rstrip("/")
         model = (env.get("SIDEKICK_LLM_MODEL") or DEFAULT_MODEL).strip()
 

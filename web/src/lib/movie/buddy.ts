@@ -64,11 +64,11 @@ export function answerWhatJustHappened(
 
   const span =
     spoken.length === 1
-      ? `the last thing said was "${last.text.trim()}"`
-      : `it went from "${first.text.trim()}" to "${last.text.trim()}"`
+      ? `we just heard "${last.text.trim()}".`
+      : `the scene went from "${first.text.trim()}" to "${last.text.trim()}".`
 
   return {
-    say: `Just before now, ${span}. That is what the captions show.`,
+    say: `Just now, ${span}`,
     basis: spoken,
     unavailable: false,
   }
@@ -88,16 +88,16 @@ export function explainTheMoment(
 
   if (spoken.length === 0) {
     return {
-      say: 'I cannot explain that moment. There is no caption line covering it, and I do not analyse the picture.',
+      say: 'I cannot explain that moment because there is no dialogue playing, and I do not analyse the picture.',
       basis: recent,
       unavailable: true,
-      reason: 'No caption cue covers the moment, and this build has no visual analysis.',
+      reason: 'No dialogue cue covers the moment.',
     }
   }
 
   const lines = spoken.map((cue) => cue.text.trim())
   return {
-    say: `From the captions: ${lines.join(' ')} I am reading the subtitle track, not the picture.`,
+    say: `${lines.join(' ')}. I am reading the subtitle track, not the picture.`,
     basis: spoken,
     unavailable: false,
   }

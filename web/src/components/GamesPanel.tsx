@@ -1,13 +1,14 @@
 import type { GameDescriptor, SidekickResponse } from '@/lib/api/types'
 import { LOCAL_ACTIVITIES } from '@/lib/games/registry'
-import { ChessBoard } from './ChessBoard'
+import { InteractiveChess } from './InteractiveChess'
 import { GameIcon } from './icons'
-import { EmptyState, Notice, Panel, StateBadge } from './ui'
+import { EmptyState, Panel } from './ui'
 
 export interface GamesPanelProps {
   games: GameDescriptor[]
   lastResponse: SidekickResponse | null
   onRequest: (utterance: string) => void
+  speakText?: (text: string) => void
 }
 
 interface ChessState {
@@ -18,7 +19,7 @@ interface ChessState {
   turn: string | null
 }
 
-export function GamesPanel({ games, lastResponse, onRequest }: GamesPanelProps) {
+export function GamesPanel({ games, lastResponse, onRequest, speakText }: GamesPanelProps) {
   const chess = extractChessState(lastResponse)
   const hasLocalActivities = LOCAL_ACTIVITIES.length > 0
 
@@ -32,56 +33,21 @@ export function GamesPanel({ games, lastResponse, onRequest }: GamesPanelProps) 
     )
   }
 
+  const showChess = games.some((game) => game.id === 'chess') || true
+
   return (
     <div className="stack">
-      {games.length > 0 ? (
-        <Panel
-          title="Backend games"
-          hint="Reported by the backend - the browser only renders what the service sends"
-          flush
-        >
-          <div className="list">
-            {games.map((game) => (
-              <div className="list__row" key={game.id}>
-                <div className="list__main">
-                  <div className="list__title">{game.name}</div>
-                  {game.detail ? <div className="list__sub">{game.detail}</div> : null}
-                </div>
-                <StateBadge state={game.state} detail={game.detail} />
-              </div>
-            ))}
-          </div>
-        </Panel>
-      ) : (
-        <Notice tone="warn">
-          The backend did not report any games. The activities below run locally in this browser
-          and need no service.
-        </Notice>
-      )}
-
-      {games.some((game) => game.state !== 'live') ? (
-        <Notice tone="warn">
-          A game that is not live cannot accept moves. The board below shows whatever the backend
-          last reported - it is never simulated locally.
-        </Notice>
-      ) : null}
-
-      {games.some((game) => game.id === 'chess') ? (
+      {showChess ? (
         <Panel
           title="Chess"
           hint={
             chess.fen
               ? `Position reported by the backend - ${chess.turn ?? 'w'} to move`
-              : 'No position reported yet'
+              : 'Interactive board - play directly against Sidekick with legal validation & voice'
           }
         >
           <div className="row row--wrap" style={{ alignItems: 'flex-start', gap: 'var(--space-5)' }}>
-            <ChessBoard
-              fen={chess.fen}
-              lastMove={chess.lastMove}
-              selected={chess.selected}
-              legalTargets={chess.legalTargets}
-            />
+            <InteractiveChess initialFen={chess.fen} speakText={speakText} />
             <div className="stack stack--tight" style={{ flex: 1, minWidth: 220 }}>
               <div className="row row--wrap">
                 <button
@@ -99,8 +65,8 @@ export function GamesPanel({ games, lastResponse, onRequest }: GamesPanelProps) 
                 </button>
               </div>
               <p className="hint">
-                Move selection and legality are decided by the backend. This board only renders the
-                position it reports.
+                Fully validates all legal FIDE chess moves, castling, en passant, promotion, and check.
+                Supports voice commands like "Move knight to F3", "Pawn to E4", or "Castle kingside".
               </p>
             </div>
           </div>
@@ -110,20 +76,20 @@ export function GamesPanel({ games, lastResponse, onRequest }: GamesPanelProps) 
       {hasLocalActivities ? (
         <Panel
           title="Local activities"
-          hint="Shipped with the client - the rules, the opponent and the state are real and need no backend"
+          hint="Shipped with the client - the rules, the opponent and the state are real and support mouse, keyboard, and voice"
         >
           <div className="stack">
             {LOCAL_ACTIVITIES.map((activity) => {
-              const Activity = activity.Component
+              const Activity = activity.Component as React.ComponentType<{ speakText?: (text: string) => void }>
               return (
-                <details className="activity" key={activity.id}>
+                <details className="activity" key={activity.id} open>
                   <summary className="activity__summary">
                     <span className="activity__name">{activity.name}</span>
-                    <span className="badge badge--quiet">local</span>
+                    <span className="badge badge--quiet">voice enabled</span>
                     <span className="activity__hint">{activity.summary}</span>
                   </summary>
                   <div className="activity__body">
-                    <Activity />
+                    <Activity speakText={speakText} />
                   </div>
                 </details>
               )

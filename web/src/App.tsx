@@ -6,6 +6,7 @@ import { useVoiceInput } from '@/lib/voice/useVoiceInput'
 import { Speaker } from '@/lib/voice/synthesis'
 import { useSidekick, type ActionRecord, type RequestRecord } from '@/state/useSidekick'
 import { ControlRoom } from './components/ControlRoom'
+import { GamesPanel } from './components/GamesPanel'
 import { MovieBuddy } from './components/MovieBuddy'
 import { SidekickMark } from './components/icons'
 import { VoiceSurface } from './components/VoiceSurface'
@@ -13,13 +14,13 @@ import { VoiceSurface } from './components/VoiceSurface'
 /**
  * Sidekick has two interfaces and one session.
  *
- * Interface A (Ask / Movie Buddy) is the conversational surface a person talks
+ * Interface A (Ask / Movie Buddy / Games) is the conversational surface a person talks
  * to. Interface B (Control room) is the developer view of the same work. Both
  * read the same request list, the same session id and the same event stream -
  * they are two views of one real session, not two demos.
  */
 
-type View = 'ask' | 'movie' | 'control'
+type View = 'ask' | 'movie' | 'games' | 'control'
 
 export function App() {
   const sidekick = useSidekick()
@@ -105,6 +106,8 @@ export function App() {
       if (containsActivation(trimmed)) {
         setView('movie')
         buddyRef.current.activate()
+      } else if (/\b(play|start|open|show)\s+(a\s+game\s+of\s+|a\s+game\s+|the\s+game\s+of\s+|the\s+)?(chess|tic\s*tac\s*toe|2048|games?)\b/i.test(trimmed)) {
+        setView('games')
       }
       void sidekick.send(trimmed, source)
     },
@@ -202,6 +205,14 @@ export function App() {
           >
             Movie Buddy
           </button>
+          <button
+            type="button"
+            className="app__view"
+            aria-current={view === 'games' ? 'page' : undefined}
+            onClick={() => setView('games')}
+          >
+            Games
+          </button>
           <span className="app__divider" aria-hidden="true" />
           <button
             type="button"
@@ -272,6 +283,19 @@ export function App() {
                 {buddyNote}
               </p>
             ) : null}
+          </div>
+        ) : null}
+
+        {view === 'games' ? (
+          <div style={{ maxWidth: 760, margin: '0 auto', width: '100%', padding: 'var(--space-4)' }}>
+            <GamesPanel
+              games={sidekick.capabilities?.games ?? [{ id: 'chess', name: 'Chess', state: 'live', detail: 'Interactive Board' }]}
+              lastResponse={sidekick.liveRequest?.response ?? null}
+              onRequest={(text) => handleUtterance(text, 'text')}
+              speakText={(text) => {
+                if (sidekick.speakEnabled) void speaker.speak(text)
+              }}
+            />
           </div>
         ) : null}
 

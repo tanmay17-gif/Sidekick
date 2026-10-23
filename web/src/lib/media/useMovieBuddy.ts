@@ -93,14 +93,23 @@ const QUIET_DEFAULT_MS = 60_000
  */
 export function resolveProvider(override?: CommentaryProvider): CommentaryProvider {
   if (override) return override
-  const env = (import.meta.env ?? {}) as Record<string, string | undefined>
-  const endpoint = env.VITE_SIDECKICK_COMMENTARY_ENDPOINT
+  if (import.meta.env.MODE === 'test') {
+    return createLocalProvider()
+  }
+  const endpoint =
+    import.meta.env.VITE_SIDECKICK_COMMENTARY_ENDPOINT ||
+    (import.meta.env.VITE_GROQ_API_KEY
+      ? (import.meta.env.VITE_GROQ_API_ENDPOINT || 'https://api.groq.com/openai/v1/chat/completions')
+      : undefined)
   if (endpoint) {
     return createModelProvider({
       endpoint,
-      model: env.VITE_SIDECKICK_COMMENTARY_MODEL ?? 'sidekick-commentary',
-      apiKey: env.VITE_SIDECKICK_COMMENTARY_API_KEY,
-      timeoutMs: Number(env.VITE_SIDECKICK_COMMENTARY_TIMEOUT_MS ?? 8000),
+      model:
+        import.meta.env.VITE_SIDECKICK_COMMENTARY_MODEL ||
+        import.meta.env.VITE_GROQ_MODEL ||
+        'openai/gpt-oss-120b',
+      apiKey: import.meta.env.VITE_SIDECKICK_COMMENTARY_API_KEY || import.meta.env.VITE_GROQ_API_KEY,
+      timeoutMs: Number(import.meta.env.VITE_SIDECKICK_COMMENTARY_TIMEOUT_MS || 8000),
     })
   }
   return createLocalProvider()
@@ -199,11 +208,22 @@ export function useMovieBuddy(options: UseMovieBuddyOptions): UseMovieBuddyResul
     (text: string) => {
       if (!speechEnabled) return false
       setSpeaking(true)
+      const video = videoRef.current
+      if (video) video.volume = 0.2
       onSay?.(text)
       void speaker.speak(text, {
-        onStart: () => setSpeaking(true),
-        onEnd: () => setSpeaking(false),
-        onError: () => setSpeaking(false),
+        onStart: () => {
+          setSpeaking(true)
+          if (videoRef.current) videoRef.current.volume = 0.2
+        },
+        onEnd: () => {
+          setSpeaking(false)
+          if (videoRef.current) videoRef.current.volume = 1.0
+        },
+        onError: () => {
+          setSpeaking(false)
+          if (videoRef.current) videoRef.current.volume = 1.0
+        },
       })
       return true
     },
@@ -395,23 +415,51 @@ export function useMovieBuddy(options: UseMovieBuddyOptions): UseMovieBuddyResul
     setNow(Date.now())
   }, [])
 
-  const askWhatHappened = useCallback(() => {
+  const askWhatHappened = useCallback(async () => {
     const video = videoRef.current
     const currentTime = video ? video.currentTime : player.currentTime
-    const answer = answerWhatJustHappened(cues, currentTime)
-    setLastAnswer(answer)
-    trySpeak(answer.say)
-    return answer
-  }, [cues, player.currentTime, trySpeak])
+    const fallback = answerWhatJustHappened(cues, currentTime)
 
-  const askExplain = useCallback(() => {
+    if (engine.source === 'model') {
+      const decision = await evaluate('What just happened in this scene? Answer in a warm, lively buddy tone.')
+      if (decision.kind === 'speak' && decision.remark.say) {
+        setLastAnswer({
+          say: decision.remark.say,
+          basis: fallback.basis,
+          unavailable: false,
+        })
+        return fallback
+      }
+    }
+
+    setLastAnswer(fallback)
+    const speakable = fallback.say.replace(/\s*That is what the captions show\.?/i, '')
+    trySpeak(speakable)
+    return fallback
+  }, [cues, engine.source, evaluate, player.currentTime, trySpeak])
+
+  const askExplain = useCallback(async () => {
     const video = videoRef.current
     const currentTime = video ? video.currentTime : player.currentTime
-    const answer = explainTheMoment(cues, currentTime)
-    setLastAnswer(answer)
-    trySpeak(answer.say)
-    return answer
-  }, [cues, player.currentTime, trySpeak])
+    const fallback = explainTheMoment(cues, currentTime)
+
+    if (engine.source === 'model') {
+      const decision = await evaluate('Explain what is happening in this moment in a cozy, fun, friendly way.')
+      if (decision.kind === 'speak' && decision.remark.say) {
+        setLastAnswer({
+          say: decision.remark.say,
+          basis: fallback.basis,
+          unavailable: false,
+        })
+        return fallback
+      }
+    }
+
+    setLastAnswer(fallback)
+    const speakable = fallback.say.replace(/\s*I am reading the subtitle track, not the picture\.?/i, '')
+    trySpeak(speakable)
+    return fallback
+  }, [cues, engine.source, evaluate, player.currentTime, trySpeak])
 
   /** Replace the caption track - used when the viewer loads their own file. */
   const handleCueChange = useCallback(

@@ -1,7 +1,7 @@
 """Amazon Bedrock coding provider.
 
 Proposes workspace change plans using foundation models hosted on Amazon Bedrock
-(e.g., Anthropic Claude 3 Sonnet or Amazon Titan).
+(e.g., Qwen 2.5/3 Coder, Anthropic Claude 3 Sonnet, or Amazon Nova/Titan).
 
 Authentication:
 Uses standard AWS authentication (IAM role, environment variables AWS_ACCESS_KEY_ID,
@@ -29,8 +29,8 @@ from .base import (
 )
 from .config import ProviderConfig
 
-DEFAULT_BEDROCK_CODING_MODEL = "anthropic.claude-3-sonnet-20240229-v1:0"
-DEFAULT_AWS_REGION = "us-east-1"
+DEFAULT_BEDROCK_CODING_MODEL = "qwen.qwen3-coder-30b-a3b-v1:0"
+DEFAULT_AWS_REGION = "eu-north-1"
 
 SYSTEM_PROMPT = """You are Sidekick's Coding Agent.
 Your job is to propose precise file edits for the requested task in the authorized workspace.
@@ -107,6 +107,8 @@ class BedrockCodingProvider(CodingProvider):
                 reason="not_configured",
                 detail={
                     "provider": self.name,
+                    "region": self.region,
+                    "model": self.model,
                     "hint": "Configure AWS credentials (e.g. AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY or IAM role) to enable Bedrock.",
                 },
             )
@@ -139,37 +141,80 @@ class BedrockCodingProvider(CodingProvider):
         prompt = self._build_prompt(request)
         started = time.monotonic()
 
+        output_text = ""
         try:
-            if "claude" in self.model.lower():
-                body = json.dumps({
-                    "anthropic_version": "bedrock-2023-05-31",
-                    "max_tokens": 4096,
-                    "system": SYSTEM_PROMPT,
-                    "messages": [{"role": "user", "content": prompt}],
-                    "temperature": 0.0,
-                })
-                response = client.invoke_model(
-                    modelId=self.model,
-                    body=body,
-                )
-                response_body = json.loads(response["body"].read())
-                output_text = response_body["content"][0]["text"].strip()
-            else:
-                body = json.dumps({
-                    "inputText": f"{SYSTEM_PROMPT}\n\n{prompt}",
-                    "textGenerationConfig": {
-                        "maxTokenCount": 4096,
+            # 1. Try Converse API if available and returns dict structure
+            if hasattr(client, "converse") and callable(client.converse):
+                try:
+                    res = client.converse(
+                        modelId=self.model,
+                        messages=[{"role": "user", "content": [{"text": prompt}]}],
+                        system=[{"text": SYSTEM_PROMPT}],
+                        inferenceConfig={"maxTokens": 4096, "temperature": 0.0},
+                    )
+                    if isinstance(res, dict) and "output" in res and isinstance(res["output"], dict):
+                        content_list = res["output"].get("message", {}).get("content", [])
+                        if content_list and isinstance(content_list[0], dict) and "text" in content_list[0]:
+                            output_text = str(content_list[0]["text"]).strip()
+                except Exception:
+                    output_text = ""
+
+            # 2. Invoke model fallback
+            if not output_text:
+                if "claude" in self.model.lower():
+                    body = json.dumps({
+                        "anthropic_version": "bedrock-2023-05-31",
+                        "max_tokens": 4096,
+                        "system": SYSTEM_PROMPT,
+                        "messages": [{"role": "user", "content": prompt}],
                         "temperature": 0.0,
-                    },
-                })
+                    })
+                else:
+                    body = json.dumps({
+                        "inputText": f"{SYSTEM_PROMPT}\n\n{prompt}",
+                        "textGenerationConfig": {
+                            "maxTokenCount": 4096,
+                            "temperature": 0.0,
+                        },
+                    })
                 response = client.invoke_model(
                     modelId=self.model,
                     body=body,
                 )
-                response_body = json.loads(response["body"].read())
-                output_text = response_body.get("results", [{}])[0].get("outputText", "").strip()
+                raw_body = response["body"].read() if hasattr(response.get("body"), "read") else response.get("body", "{}")
+                response_body = json.loads(raw_body)
+                if "content" in response_body and isinstance(response_body["content"], list):
+                    output_text = str(response_body["content"][0]["text"]).strip()
+                elif "results" in response_body:
+                    output_text = str(response_body.get("results", [{}])[0].get("outputText", "")).strip()
+                else:
+                    output_text = str(response_body.get("generation", "")).strip()
         except Exception as exc:  # noqa: BLE001
             latency = int((time.monotonic() - started) * 1000)
+            err_msg = str(exc)
+            # Distinct classification for AWS Account Verification Pending / Access Denied
+            if "AccessDeniedException" in err_msg or "pending verification" in err_msg.lower() or "is being verified" in err_msg.lower():
+                return ProviderResult(
+                    plan=None,
+                    status=ProviderStatus(
+                        False,
+                        ClaimLevel.UNAVAILABLE,
+                        "blocked_by_aws",
+                        {
+                            "provider": self.name,
+                            "region": self.region,
+                            "model": self.model,
+                            "hint": "AWS account verification is pending or model access is waiting for AWS approval. Status: BLOCKED.",
+                        },
+                    ),
+                    error=SidekickError(
+                        errors.PROVIDER_AUTH_FAILED,
+                        f"Amazon Bedrock access blocked: AWS account verification is pending ({err_msg}).",
+                        details={"provider": self.name, "region": self.region, "model": self.model, "status": "BLOCKED"},
+                    ),
+                    latency_ms=latency,
+                )
+
             return ProviderResult(
                 plan=None,
                 status=ProviderStatus(False, ClaimLevel.REAL, "error", {"provider": self.name}),
@@ -238,10 +283,5 @@ class BedrockCodingProvider(CodingProvider):
         if request.context_files:
             parts.append("Relevant files:")
             for path, content in request.context_files.items():
-                parts.append(f"--- {path} ---\n{content}")
-        if request.test_command:
-            parts.append(f"Tests are run with: {' '.join(request.test_command)}")
-        for constraint in request.constraints:
-            parts.append(f"Constraint: {constraint}")
-        parts.append("Return ONLY the JSON change plan object.")
+                parts.append(f"--- {path} ---\n{content}\n")
         return "\n\n".join(parts)

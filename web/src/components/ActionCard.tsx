@@ -21,6 +21,10 @@ export interface ActionCardProps {
   onRetry?: (record: ActionRecord) => void
 }
 
+import { InteractiveChess } from './InteractiveChess'
+import { TicTacToe } from './TicTacToe'
+import { Game2048 } from './Game2048'
+
 export function ActionCard({
   record,
   busy = false,
@@ -34,6 +38,12 @@ export function ActionCard({
   const needsApproval = state === 'awaiting_confirmation'
   const failure = friendlyFailure(action, state)
   const simulated = isSimulated(action)
+
+  const isGame = action.tool.startsWith('game.')
+  const desc = (action.description || '').toLowerCase()
+  const argGame = String((action.arguments as Record<string, unknown> | undefined)?.game || '').toLowerCase()
+  const isTtt = desc.includes('tic') || argGame.includes('tic')
+  const is2048 = desc.includes('2048') || argGame.includes('2048')
 
   return (
     <article className="task-card" data-state={state}>
@@ -61,6 +71,12 @@ export function ActionCard({
       </div>
 
       <p className="task-card__line">{actionStatusLine(action, state)}</p>
+
+      {isGame && (
+        <div style={{ marginTop: 'var(--space-3)' }}>
+          {isTtt ? <TicTacToe /> : is2048 ? <Game2048 /> : <InteractiveChess />}
+        </div>
+      )}
 
       {needsApproval && onApprove ? (
         <div className="task-card__approval">
