@@ -402,6 +402,121 @@ def create_app(engine: DecisionEngine | None = None, alexa_verifier: Any = None)
 
         return alexa_adapter.handle(payload)
 
+    @app.api_route("/mcp", methods=["GET", "POST", "OPTIONS"])
+    @app.api_route("/api/v1/mcp", methods=["GET", "POST", "OPTIONS"])
+    @app.api_route("/v1/mcp", methods=["GET", "POST", "OPTIONS"])
+    async def mcp_streamable_http(request: Request) -> Any:
+        """Streamable HTTP endpoint for Model Context Protocol (spec 2025-11-25).
+
+        Enables Alexa+, Claude Desktop, Cursor, and web clients to connect over
+        standard HTTP/SSE without needing local stdio pipes.
+        """
+        from fastapi.responses import JSONResponse, Response, StreamingResponse
+        import urllib.request
+        import urllib.error
+        import uuid
+
+        origin = request.headers.get("origin", "*")
+        if request.method == "OPTIONS":
+            return Response(
+                status_code=204,
+                headers={
+                    "Access-Control-Allow-Origin": origin,
+                    "Access-Control-Allow-Methods": "POST, GET, OPTIONS",
+                    "Access-Control-Allow-Headers": "Content-Type, Authorization, Mcp-Session-Id, MCP-Protocol-Version, Accept",
+                    "Access-Control-Expose-Headers": "Mcp-Session-Id, MCP-Protocol-Version",
+                },
+            )
+
+        exec_base = os.environ.get("SIDEKICK_EXECUTION_URL", "http://127.0.0.1:8088").rstrip("/")
+        target_url = f"{exec_base}/mcp"
+
+        fwd_headers: dict[str, str] = {}
+        for h in ("content-type", "authorization", "mcp-session-id", "mcp-protocol-version", "accept", "origin"):
+            val = request.headers.get(h)
+            if val is not None:
+                fwd_headers[h] = val
+
+        body_bytes = await request.body()
+        req = urllib.request.Request(
+            target_url,
+            data=body_bytes if request.method == "POST" else None,
+            headers=fwd_headers,
+            method=request.method,
+        )
+
+        try:
+            with urllib.request.urlopen(req, timeout=60.0) as resp:
+                resp_bytes = resp.read()
+                out_headers = {
+                    "Access-Control-Allow-Origin": origin,
+                    "Content-Type": resp.headers.get("Content-Type", "application/json"),
+                }
+                if resp.headers.get("Mcp-Session-Id"):
+                    out_headers["Mcp-Session-Id"] = resp.headers.get("Mcp-Session-Id")
+                if resp.headers.get("MCP-Protocol-Version"):
+                    out_headers["MCP-Protocol-Version"] = resp.headers.get("MCP-Protocol-Version")
+
+                return Response(
+                    content=resp_bytes,
+                    status_code=resp.status,
+                    headers=out_headers,
+                )
+        except urllib.error.HTTPError as exc:
+            err_body = exc.read()
+            out_headers = {"Access-Control-Allow-Origin": origin}
+            if exc.headers.get("Mcp-Session-Id"):
+                out_headers["Mcp-Session-Id"] = exc.headers.get("Mcp-Session-Id")
+            if exc.headers.get("Allow"):
+                out_headers["Allow"] = exc.headers.get("Allow")
+            return Response(
+                content=err_body,
+                status_code=exc.code,
+                headers=out_headers,
+                media_type=exc.headers.get("Content-Type", "application/json"),
+            )
+        except Exception:
+            from sidekick_execution.service import ExecutionService, ExecutionConfig
+            from sidekick_execution.mcp_server import MCPServer
+
+            session_id = request.headers.get("mcp-session-id") or str(uuid.uuid4())
+            service = ExecutionService.create(ExecutionConfig.from_env())
+            mcp = MCPServer(service, session_id=session_id)
+            if request.method == "GET":
+                accept = request.headers.get("accept", "")
+                if "text/event-stream" not in accept:
+                    return JSONResponse(
+                        {"error": {"code": "method_not_allowed", "message": "GET only supported for SSE streams"}},
+                        status_code=405,
+                        headers={"Allow": "POST", "Access-Control-Allow-Origin": origin},
+                    )
+                return StreamingResponse(
+                    iter(["event: endpoint\ndata: /mcp\n\n"]),
+                    media_type="text/event-stream",
+                    headers={
+                        "Mcp-Session-Id": session_id,
+                        "MCP-Protocol-Version": "2025-11-25",
+                        "Access-Control-Allow-Origin": origin,
+                    },
+                )
+
+            try:
+                body_json = json.loads(body_bytes.decode("utf-8") if body_bytes else "{}")
+            except Exception:
+                raise HTTPException(status_code=400, detail="Invalid JSON")
+            result = mcp.handle(body_json)
+            if result is None:
+                return Response(status_code=202, headers={"Mcp-Session-Id": session_id, "Access-Control-Allow-Origin": origin})
+            return JSONResponse(
+                result,
+                status_code=200,
+                headers={
+                    "Mcp-Session-Id": session_id,
+                    "MCP-Protocol-Version": mcp.negotiated_version,
+                    "Access-Control-Allow-Origin": origin,
+                },
+            )
+
     @app.get("/")
     async def index() -> Any:
         # The built browser client wins over the placeholder page.

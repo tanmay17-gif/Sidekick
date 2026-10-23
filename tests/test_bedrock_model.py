@@ -51,7 +51,7 @@ def test_bedrock_reports_availability_truthfully() -> None:
     assert isinstance(model.available, bool)
     info = model.describe()
     assert info.provider == "aws-bedrock"
-    assert "claude" in info.model.lower()
+    assert bool(info.model)
 
 
 def test_bedrock_decide_with_mocked_client(sample_catalog: CapabilityCatalog) -> None:

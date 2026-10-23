@@ -28,9 +28,10 @@ from typing import Any, Dict, Optional, TextIO
 from .errors import SidekickError
 from .service import ExecutionService
 
-PROTOCOL_VERSION = "2024-11-05"
+PROTOCOL_VERSION = "2025-11-25"
+SUPPORTED_PROTOCOL_VERSIONS = ("2025-11-25", "2024-11-05")
 SERVER_NAME = "sidekick-execution"
-SERVER_VERSION = "0.1.0"
+SERVER_VERSION = "0.2.0"
 
 # JSON-RPC error codes.
 PARSE_ERROR = -32700
@@ -39,14 +40,208 @@ METHOD_NOT_FOUND = -32601
 INVALID_PARAMS = -32602
 INTERNAL_ERROR = -32603
 
+# Tool metadata per MCP 2025-11-25 specification
+# Includes human-readable title, risk-aligned annotations, and outputSchema
+TOOL_METADATA: Dict[str, Dict[str, Any]] = {
+    "coding.execute": {
+        "title": "Execute Code Changes",
+        "annotations": {
+            "readOnlyHint": False,
+            "destructiveHint": True,
+            "idempotentHint": False,
+            "openWorldHint": True,
+        },
+        "outputSchema": {
+            "type": "object",
+            "properties": {
+                "action": {"type": "object"},
+                "result": {"type": "object"},
+                "error": {"type": ["object", "null"]},
+            },
+        },
+    },
+    "coding.run_tests": {
+        "title": "Run Project Test Suite",
+        "annotations": {
+            "readOnlyHint": True,
+            "destructiveHint": False,
+            "idempotentHint": True,
+            "openWorldHint": False,
+        },
+        "outputSchema": {
+            "type": "object",
+            "properties": {
+                "exit_code": {"type": "integer"},
+                "stdout": {"type": "string"},
+                "stderr": {"type": "string"},
+                "passed": {"type": "boolean"},
+            },
+        },
+    },
+    "workspace.inspect": {
+        "title": "Inspect Workspace Directory",
+        "annotations": {
+            "readOnlyHint": True,
+            "destructiveHint": False,
+            "idempotentHint": True,
+            "openWorldHint": False,
+        },
+        "outputSchema": {
+            "type": "object",
+            "properties": {
+                "files": {"type": "array", "items": {"type": "string"}},
+                "git": {"type": "object"},
+            },
+        },
+    },
+    "vcs.diff": {
+        "title": "Git Diff Workspace",
+        "annotations": {
+            "readOnlyHint": True,
+            "destructiveHint": False,
+            "idempotentHint": True,
+            "openWorldHint": False,
+        },
+        "outputSchema": {
+            "type": "object",
+            "properties": {
+                "diff": {"type": "string"},
+                "stats": {"type": "object"},
+            },
+        },
+    },
+    "vcs.commit": {
+        "title": "Create Git Commit",
+        "annotations": {
+            "readOnlyHint": False,
+            "destructiveHint": False,
+            "idempotentHint": False,
+            "openWorldHint": False,
+        },
+        "outputSchema": {
+            "type": "object",
+            "properties": {
+                "commit_hash": {"type": "string"},
+                "message": {"type": "string"},
+            },
+        },
+    },
+    "system.info": {
+        "title": "System Runtime Info",
+        "annotations": {
+            "readOnlyHint": True,
+            "destructiveHint": False,
+            "idempotentHint": True,
+            "openWorldHint": False,
+        },
+        "outputSchema": {
+            "type": "object",
+            "properties": {
+                "os": {"type": "string"},
+                "python": {"type": "string"},
+                "capabilities": {"type": "object"},
+            },
+        },
+    },
+    "system.volume": {
+        "title": "Control System Volume",
+        "annotations": {
+            "readOnlyHint": False,
+            "destructiveHint": False,
+            "idempotentHint": True,
+            "openWorldHint": False,
+        },
+        "outputSchema": {
+            "type": "object",
+            "properties": {
+                "volume": {"type": "integer"},
+                "muted": {"type": "boolean"},
+            },
+        },
+    },
+    "system.media_control": {
+        "title": "Media Playback Control",
+        "annotations": {
+            "readOnlyHint": False,
+            "destructiveHint": False,
+            "idempotentHint": False,
+            "openWorldHint": False,
+        },
+        "outputSchema": {
+            "type": "object",
+            "properties": {
+                "action": {"type": "string"},
+                "success": {"type": "boolean"},
+            },
+        },
+    },
+    "system.open": {
+        "title": "Open File or URL",
+        "annotations": {
+            "readOnlyHint": False,
+            "destructiveHint": False,
+            "idempotentHint": True,
+            "openWorldHint": True,
+        },
+        "outputSchema": {
+            "type": "object",
+            "properties": {
+                "target": {"type": "string"},
+                "opened": {"type": "boolean"},
+            },
+        },
+    },
+    "system.clipboard": {
+        "title": "System Clipboard Access",
+        "annotations": {
+            "readOnlyHint": False,
+            "destructiveHint": False,
+            "idempotentHint": True,
+            "openWorldHint": False,
+        },
+        "outputSchema": {
+            "type": "object",
+            "properties": {
+                "text": {"type": "string"},
+            },
+        },
+    },
+    "web.fetch": {
+        "title": "Fetch Web Resource",
+        "annotations": {
+            "readOnlyHint": True,
+            "destructiveHint": False,
+            "idempotentHint": True,
+            "openWorldHint": True,
+        },
+        "outputSchema": {
+            "type": "object",
+            "properties": {
+                "status_code": {"type": "integer"},
+                "body": {"type": "string"},
+                "headers": {"type": "object"},
+            },
+        },
+    },
+}
+
 
 class MCPServer:
-    """A minimal but correct MCP server over stdio."""
+    """A standards-compliant MCP server supporting stdio and Streamable HTTP (spec 2025-11-25)."""
 
-    def __init__(self, service: ExecutionService, *, stdin: Optional[TextIO] = None, stdout: Optional[TextIO] = None) -> None:
+    def __init__(
+        self,
+        service: ExecutionService,
+        *,
+        stdin: Optional[TextIO] = None,
+        stdout: Optional[TextIO] = None,
+        session_id: Optional[str] = None,
+    ) -> None:
         self.service = service
         self.stdin = stdin or sys.stdin
         self.stdout = stdout or sys.stdout
+        self.session_id = session_id
+        self.negotiated_version: str = PROTOCOL_VERSION
         self._lock = threading.Lock()
 
     # -- lifecycle ---------------------------------------------------------
@@ -82,11 +277,20 @@ class MCPServer:
             return self._error(message_id, INVALID_PARAMS, "'params' must be an object.")
 
         if method == "initialize":
+            client_version = params.get("protocolVersion")
+            if client_version in SUPPORTED_PROTOCOL_VERSIONS:
+                self.negotiated_version = client_version
+            else:
+                self.negotiated_version = PROTOCOL_VERSION
+
             return self._result(
                 message_id,
                 {
-                    "protocolVersion": PROTOCOL_VERSION,
-                    "capabilities": {"tools": {"listChanged": False}},
+                    "protocolVersion": self.negotiated_version,
+                    "capabilities": {
+                        "tools": {"listChanged": False},
+                        "logging": {},
+                    },
                     "serverInfo": {"name": SERVER_NAME, "version": SERVER_VERSION},
                 },
             )
@@ -106,11 +310,29 @@ class MCPServer:
     def _tool_list(self) -> list:
         tools = []
         for spec in self.service.registry.list_tools():
+            meta = TOOL_METADATA.get(spec.name, {})
+            title = meta.get("title", spec.name.replace(".", " ").title())
+            annotations = meta.get(
+                "annotations",
+                {
+                    "readOnlyHint": spec.risk_level == "LOW",
+                    "destructiveHint": spec.destructive or spec.risk_level == "HIGH",
+                    "idempotentHint": spec.risk_level == "LOW",
+                    "openWorldHint": spec.name.startswith("web.") or spec.name.startswith("coding."),
+                },
+            )
+            output_schema = meta.get(
+                "outputSchema",
+                {"type": "object", "properties": {}},
+            )
             tools.append(
                 {
                     "name": spec.name,
+                    "title": title,
                     "description": spec.description,
                     "inputSchema": spec.arguments_schema or {"type": "object", "properties": {}},
+                    "outputSchema": output_schema,
+                    "annotations": annotations,
                 }
             )
         return tools
@@ -123,7 +345,11 @@ class MCPServer:
         if not isinstance(arguments, dict):
             return self._error(message_id, INVALID_PARAMS, "Tool 'arguments' must be an object.")
         try:
-            payload = self.service.job_manager.submit(name, arguments)
+            payload = self.service.job_manager.submit(
+                name,
+                arguments,
+                session_id=self.session_id,
+            )
         except SidekickError as exc:
             return self._result(
                 message_id,
@@ -139,10 +365,12 @@ class MCPServer:
             "result": action.result,
             "error": action.error.to_dict() if action.error else None,
         }
+        structured = action.result if isinstance(action.result, dict) else body
         return self._result(
             message_id,
             {
                 "content": [{"type": "text", "text": json.dumps(body, default=str)}],
+                "structuredContent": structured,
                 "isError": action.state != "succeeded",
             },
         )

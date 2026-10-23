@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import io
 import json
+import os
 import unittest
 from unittest.mock import MagicMock
 
@@ -15,12 +16,13 @@ from sidekick_execution.service import select_provider
 
 class BedrockCodingProviderTests(unittest.TestCase):
     def test_missing_aws_credentials_reports_not_configured(self) -> None:
-        provider = BedrockCodingProvider()
-        status = provider.status()
-        self.assertFalse(status.available)
-        self.assertEqual(status.reason, "not_configured")
-        self.assertEqual(status.level, ClaimLevel.UNAVAILABLE)
-        self.assertIn("AWS credentials", status.detail.get("hint", ""))
+        with unittest.mock.patch.dict(os.environ, {"AWS_ACCESS_KEY_ID": "", "AWS_SECRET_ACCESS_KEY": ""}):
+            provider = BedrockCodingProvider()
+            status = provider.status()
+            self.assertFalse(status.available)
+            self.assertEqual(status.reason, "not_configured")
+            self.assertEqual(status.level, ClaimLevel.UNAVAILABLE)
+            self.assertIn("AWS credentials", status.detail.get("hint", ""))
 
     def test_configured_client_reports_real_provider(self) -> None:
         mock_client = MagicMock()
@@ -31,11 +33,12 @@ class BedrockCodingProviderTests(unittest.TestCase):
         self.assertEqual(status.detail.get("provider"), "bedrock")
 
     def test_planning_without_credentials_returns_structured_error(self) -> None:
-        provider = BedrockCodingProvider()
-        result = provider.plan(CodingRequest(task="fix bug", workspace="C:\\workspace"))
-        self.assertFalse(result.ok)
-        self.assertIsNotNone(result.error)
-        self.assertEqual(result.error.code, errors.PROVIDER_NOT_CONFIGURED)
+        with unittest.mock.patch.dict(os.environ, {"AWS_ACCESS_KEY_ID": "", "AWS_SECRET_ACCESS_KEY": ""}):
+            provider = BedrockCodingProvider()
+            result = provider.plan(CodingRequest(task="fix bug", workspace="C:\\workspace"))
+            self.assertFalse(result.ok)
+            self.assertIsNotNone(result.error)
+            self.assertEqual(result.error.code, errors.PROVIDER_NOT_CONFIGURED)
 
     def test_successful_plan_with_mock_client(self) -> None:
         mock_client = MagicMock()

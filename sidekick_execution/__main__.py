@@ -48,6 +48,10 @@ def main(argv: Optional[List[str]] = None) -> int:
     serve_parser.add_argument("--host", default="127.0.0.1")
     serve_parser.add_argument("--port", type=int, default=8088)
 
+    mcp_http_parser = sub.add_parser("mcp-http", help="Run the MCP Streamable HTTP service (spec 2025-11-25).")
+    mcp_http_parser.add_argument("--host", default="127.0.0.1")
+    mcp_http_parser.add_argument("--port", type=int, default=8089)
+
     sub.add_parser("mcp", help="Run the MCP tool server over stdio.")
     sub.add_parser("capabilities", help="Print the truthful capability report.")
     sub.add_parser("info", help="Print the real runtime capabilities of this machine.")
@@ -58,6 +62,20 @@ def main(argv: Optional[List[str]] = None) -> int:
     if args.command == "serve":
         httpd = serve(service, args.host, args.port)
         print(f"sidekick-execution listening on http://{args.host}:{args.port}", flush=True)
+        try:
+            httpd.serve_forever()
+        except KeyboardInterrupt:  # pragma: no cover - interactive
+            pass
+        finally:
+            httpd.server_close()
+            service.job_manager.shutdown()
+        return 0
+
+    if args.command == "mcp-http":
+        from .http_service import serve_mcp_http
+
+        httpd = serve_mcp_http(service, args.host, args.port)
+        print(f"sidekick-execution MCP Streamable HTTP listening on http://{args.host}:{args.port}/mcp", flush=True)
         try:
             httpd.serve_forever()
         except KeyboardInterrupt:  # pragma: no cover - interactive

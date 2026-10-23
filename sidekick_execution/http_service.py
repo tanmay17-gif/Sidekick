@@ -25,9 +25,11 @@ documented in :mod:`sidekick_execution.events`. A client may pass
 from __future__ import annotations
 
 import json
+import os
 import queue
 import threading
 import time
+import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any, Dict, Optional, Tuple
 from urllib.parse import parse_qs, urlparse
@@ -38,6 +40,22 @@ from .service import ExecutionService
 
 JSON_CONTENT_TYPE = "application/json"
 SSE_CONTENT_TYPE = "text/event-stream"
+
+
+def _is_origin_allowed(origin: Optional[str]) -> bool:
+    """Allow localhost, local ips, render domains, hackathon and spec domains."""
+    if not origin:
+        return True
+    origin_lower = origin.lower()
+    allowed_substrings = (
+        "localhost",
+        "127.0.0.1",
+        "0.0.0.0",
+        ".onrender.com",
+        "amazonappdev2026.devpost.com",
+        "modelcontextprotocol.io",
+    )
+    return any(sub in origin_lower for sub in allowed_substrings)
 
 
 class ExecutionHTTPServer(ThreadingHTTPServer):
@@ -86,12 +104,54 @@ class ExecutionRequestHandler(BaseHTTPRequestHandler):
             raise SidekickError("invalid_request", "The request body must be a JSON object.")
         return parsed
 
+    def _is_authorized(self) -> bool:
+        required_token = os.environ.get("SIDEKICK_MCP_TOKEN")
+        if not required_token:
+            return True
+        auth = self.headers.get("Authorization", "")
+        if auth.startswith("Bearer "):
+            return auth[7:].strip() == required_token
+        return False
+
+    def do_OPTIONS(self) -> None:  # noqa: N802 - stdlib naming
+        origin = self.headers.get("Origin", "*")
+        self.send_response(204)
+        self.send_header("Access-Control-Allow-Origin", origin)
+        self.send_header("Access-Control-Allow-Methods", "POST, GET, OPTIONS")
+        self.send_header(
+            "Access-Control-Allow-Headers",
+            "Content-Type, Authorization, Mcp-Session-Id, MCP-Protocol-Version, Accept",
+        )
+        self.send_header("Access-Control-Expose-Headers", "Mcp-Session-Id, MCP-Protocol-Version")
+        self.end_headers()
+
     # -- routing -----------------------------------------------------------
     def do_GET(self) -> None:  # noqa: N802 - stdlib naming
         parsed = urlparse(self.path)
         parts = [p for p in parsed.path.split("/") if p]
         query = parse_qs(parsed.query)
         try:
+            if parts in (["mcp"], ["v1", "mcp"]):
+                origin = self.headers.get("Origin")
+                if not _is_origin_allowed(origin):
+                    self._send_json(403, {"error": {"code": "forbidden", "message": "Origin not allowed."}})
+                    return
+                if not self._is_authorized():
+                    self._send_json(401, {"error": {"code": "unauthorized", "message": "Missing or invalid Bearer token."}})
+                    return
+                accept = self.headers.get("Accept", "")
+                if "text/event-stream" not in accept:
+                    self.send_response(405)
+                    self.send_header("Allow", "POST")
+                    self.send_header("Content-Type", JSON_CONTENT_TYPE)
+                    self.end_headers()
+                    self.wfile.write(
+                        json.dumps({"error": {"code": "method_not_allowed", "message": "GET only supported for SSE streams with Accept: text/event-stream"}}).encode("utf-8")
+                    )
+                    return
+                session_id = self.headers.get("Mcp-Session-Id") or str(uuid.uuid4())
+                self._stream_mcp_sse(session_id)
+                return
             if parts == ["v1", "health"]:
                 self._send_json(200, self._health())
                 return
@@ -122,6 +182,16 @@ class ExecutionRequestHandler(BaseHTTPRequestHandler):
         parts = [p for p in parsed.path.split("/") if p]
         try:
             body = self._read_json()
+            if parts in (["mcp"], ["v1", "mcp"]):
+                origin = self.headers.get("Origin")
+                if not _is_origin_allowed(origin):
+                    self._send_json(403, {"error": {"code": "forbidden", "message": "Origin not allowed."}})
+                    return
+                if not self._is_authorized():
+                    self._send_json(401, {"error": {"code": "unauthorized", "message": "Missing or invalid Bearer token."}})
+                    return
+                self._handle_mcp_post(body)
+                return
             if parts == ["v1", "actions"]:
                 self._submit(body)
                 return
@@ -225,8 +295,71 @@ class ExecutionRequestHandler(BaseHTTPRequestHandler):
         return event.type in TERMINAL_EVENT_TYPES
 
 
+    # -- MCP Streamable HTTP -----------------------------------------------
+    def _handle_mcp_post(self, body: Dict[str, Any]) -> None:
+        session_id = self.headers.get("Mcp-Session-Id") or str(uuid.uuid4())
+        from .mcp_server import MCPServer
+
+        mcp = MCPServer(self.service, session_id=session_id)
+        response = mcp.handle(body)
+
+        origin = self.headers.get("Origin", "*")
+
+        # Handle notifications (e.g. notifications/initialized or messages without id)
+        if response is None:
+            self.send_response(202)
+            self.send_header("Mcp-Session-Id", session_id)
+            self.send_header("MCP-Protocol-Version", mcp.negotiated_version)
+            self.send_header("Access-Control-Allow-Origin", origin)
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+            return
+
+        accept = self.headers.get("Accept", "")
+        if "text/event-stream" in accept and "application/json" not in accept:
+            self.send_response(200)
+            self.send_header("Content-Type", SSE_CONTENT_TYPE)
+            self.send_header("Cache-Control", "no-cache")
+            self.send_header("Mcp-Session-Id", session_id)
+            self.send_header("MCP-Protocol-Version", mcp.negotiated_version)
+            self.send_header("Access-Control-Allow-Origin", origin)
+            self.end_headers()
+            frame = f"event: message\ndata: {json.dumps(response, default=str)}\n\n".encode("utf-8")
+            self.wfile.write(frame)
+            self.wfile.flush()
+        else:
+            payload_bytes = json.dumps(response, default=str).encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", JSON_CONTENT_TYPE)
+            self.send_header("Content-Length", str(len(payload_bytes)))
+            self.send_header("Mcp-Session-Id", session_id)
+            self.send_header("MCP-Protocol-Version", mcp.negotiated_version)
+            self.send_header("Access-Control-Allow-Origin", origin)
+            self.end_headers()
+            self.wfile.write(payload_bytes)
+
+    def _stream_mcp_sse(self, session_id: str) -> None:
+        origin = self.headers.get("Origin", "*")
+        self.send_response(200)
+        self.send_header("Content-Type", SSE_CONTENT_TYPE)
+        self.send_header("Cache-Control", "no-cache")
+        self.send_header("Mcp-Session-Id", session_id)
+        self.send_header("MCP-Protocol-Version", "2025-11-25")
+        self.send_header("Access-Control-Allow-Origin", origin)
+        self.end_headers()
+        self.wfile.write(b"event: endpoint\ndata: /mcp\n\n")
+        self.wfile.flush()
+
+
 def serve(service: ExecutionService, host: str = "127.0.0.1", port: int = 8088) -> ExecutionHTTPServer:
     """Create (but do not start) the HTTP server."""
+    return ExecutionHTTPServer((host, port), service)
+
+
+def serve_mcp_http(
+    service: ExecutionService, host: str = "127.0.0.1", port: int = 8089
+) -> ExecutionHTTPServer:
+    """Create (but do not start) the dedicated MCP Streamable HTTP server."""
     return ExecutionHTTPServer((host, port), service)
 
 
@@ -238,3 +371,4 @@ def serve_in_thread(
     thread = threading.Thread(target=httpd.serve_forever, daemon=True)
     thread.start()
     return httpd, thread
+

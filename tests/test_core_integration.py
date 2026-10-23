@@ -42,6 +42,8 @@ def has_real_provider() -> bool:
     """Is a real coding provider configured in this environment?"""
     if os.environ.get("SIDEKICK_LLM_API_KEY"):
         return True
+    if os.environ.get("AWS_ACCESS_KEY_ID") and os.environ.get("SIDEKICK_PROVIDER") == "bedrock":
+        return True
     cli = os.environ.get("SIDEKICK_CODING_CLI")
     if not cli:
         return False
