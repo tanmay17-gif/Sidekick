@@ -12,8 +12,24 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
+from pathlib import Path
 from typing import List, Optional
+
+# ---------------------------------------------------------------------------
+# Load .env from the project root (two levels up from this package) so that
+# AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, BEDROCK_MODEL_ID and all other
+# settings are available before boto3 / service initialisation.
+# ---------------------------------------------------------------------------
+try:
+    from dotenv import load_dotenv as _load_dotenv
+
+    _env_path = Path(__file__).resolve().parent.parent / ".env"
+    if _env_path.exists():
+        _load_dotenv(dotenv_path=str(_env_path), override=False)
+except Exception:  # noqa: BLE001  – dotenv is optional
+    pass
 
 from .http_service import serve
 from .mcp_server import MCPServer
