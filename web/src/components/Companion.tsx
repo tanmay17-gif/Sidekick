@@ -1,12 +1,17 @@
 import type { CSSProperties } from 'react'
 
 /**
- * The Sidekick companion.
+ * The Sidekick companion — Alexa-style glowing ring orb.
  *
- * It is not a logo and it is not decoration: every visual property is bound
- * to a state the product is actually in - idle, listening, thinking, acting,
- * waiting, speaking, quiet or error. Motion explains the state change and it
- * stops entirely under `prefers-reduced-motion`.
+ * No face. State is communicated purely through the ring:
+ *   idle      → dim ring, slow breathe
+ *   listening → cyan ring, expanding pulse waves
+ *   thinking  → blue ring, rotating arc
+ *   acting    → purple ring, fast pulse
+ *   waiting   → amber ring, slow spin
+ *   speaking  → cyan ring, wave ripples
+ *   error     → red ring
+ *   off / quiet → near-invisible ring
  */
 
 export type CompanionState =
@@ -22,23 +27,21 @@ export type CompanionState =
 
 export interface CompanionProps {
   state: CompanionState
-  /** Rendered size in pixels. */
   size?: number
-  /** Optional short caption shown beside the companion. */
   label?: string
   className?: string
 }
 
 const STATE_TEXT: Record<CompanionState, string> = {
-  off: 'Sidekick is switched off',
-  idle: 'Sidekick is here when you need it',
+  off:       'Sidekick is switched off',
+  idle:      'Sidekick is here when you need it',
   listening: 'Sidekick is listening',
-  thinking: 'Sidekick is thinking',
-  acting: 'Sidekick is working',
-  waiting: 'Sidekick is waiting for you',
-  speaking: 'Sidekick is speaking',
-  quiet: 'Sidekick is staying quiet',
-  error: 'Sidekick hit a problem',
+  thinking:  'Sidekick is thinking',
+  acting:    'Sidekick is working',
+  waiting:   'Sidekick is waiting for you',
+  speaking:  'Sidekick is speaking',
+  quiet:     'Sidekick is staying quiet',
+  error:     'Sidekick hit a problem',
 }
 
 export function Companion({ state, size = 92, label, className }: CompanionProps) {
@@ -54,66 +57,54 @@ export function Companion({ state, size = 92, label, className }: CompanionProps
     >
       <svg viewBox="0 0 200 200" className="companion__art" aria-hidden="true" focusable="false">
         <defs>
-          <radialGradient id="companion-halo" cx="50%" cy="50%" r="50%">
-            <stop offset="0%" stopColor="var(--companion-glow)" stopOpacity="0.34" />
-            <stop offset="58%" stopColor="var(--companion-glow)" stopOpacity="0.09" />
-            <stop offset="100%" stopColor="var(--companion-glow)" stopOpacity="0" />
+          {/* Radial gradient for the sphere body — deep navy with a subtle inner highlight */}
+          <radialGradient id="orb-body" cx="38%" cy="32%" r="65%">
+            <stop offset="0%"   stopColor="#1e3a5f" />
+            <stop offset="45%"  stopColor="#0a1a2e" />
+            <stop offset="100%" stopColor="#040a12" />
           </radialGradient>
-          <linearGradient id="companion-body" x1="16%" y1="4%" x2="86%" y2="98%">
-            <stop offset="0%" stopColor="var(--companion-light)" />
-            <stop offset="52%" stopColor="var(--companion-mid)" />
-            <stop offset="100%" stopColor="var(--companion-deep)" />
-          </linearGradient>
-          <clipPath id="companion-clip">
-            <circle cx="100" cy="100" r="56" />
+
+          {/* Glow ring gradient — used for the outer halo */}
+          <radialGradient id="orb-halo" cx="50%" cy="50%" r="50%">
+            <stop offset="60%" stopColor="var(--ring-color)" stopOpacity="0" />
+            <stop offset="82%" stopColor="var(--ring-color)" stopOpacity="0.35" />
+            <stop offset="100%" stopColor="var(--ring-color)" stopOpacity="0" />
+          </radialGradient>
+
+          {/* Clip to the sphere */}
+          <clipPath id="orb-clip">
+            <circle cx="100" cy="100" r="68" />
           </clipPath>
         </defs>
 
-        {/* The halo breathes with the state. */}
-        <circle className="companion__halo" cx="100" cy="100" r="92" fill="url(#companion-halo)" />
+        {/* Outer ambient halo — breathes with state */}
+        <circle className="companion__halo" cx="100" cy="100" r="96" fill="url(#orb-halo)" />
 
-        {/* Listening rings show that the microphone is open. */}
-        <g className="companion__rings">
-          <circle cx="100" cy="100" r="62" />
-          <circle cx="100" cy="100" r="62" />
+        {/* Pulse wave 1 — listening / speaking */}
+        <circle className="companion__wave companion__wave--1" cx="100" cy="100" r="76" />
+
+        {/* Pulse wave 2 — offset */}
+        <circle className="companion__wave companion__wave--2" cx="100" cy="100" r="76" />
+
+        {/* The sphere body */}
+        <circle cx="100" cy="100" r="68" fill="url(#orb-body)" />
+
+        {/* Inner top-left sheen — makes it look like a real sphere */}
+        <ellipse cx="78" cy="72" rx="24" ry="16"
+          fill="white" opacity="0.05"
+          clipPath="url(#orb-clip)" />
+
+        {/* The Alexa ring — glowing band at the equator of the sphere */}
+        <circle className="companion__ring" cx="100" cy="100" r="68" />
+
+        {/* Thinking arc — rotating, only visible in thinking state */}
+        <g className="companion__arc">
+          <path d="M100 28 A72 72 0 0 1 172 100" />
+          <path d="M100 172 A72 72 0 0 1 28 100" />
         </g>
 
-        {/* The waiting ring is dashed: it is asking for something. */}
-        <circle className="companion__waiting" cx="100" cy="100" r="70" />
-
-        {/* Thinking arcs rotate while the decision engine works. */}
-        <g className="companion__arcs">
-          <path d="M100 24 A76 76 0 0 1 176 100" />
-          <path d="M100 176 A76 76 0 0 1 24 100" />
-        </g>
-
-        {/* Speaking waves. */}
-        <g className="companion__waves">
-          <circle cx="100" cy="100" r="72" />
-          <circle cx="100" cy="100" r="82" />
-        </g>
-
-        {/* The body. */}
-        <g className="companion__body">
-          <circle cx="100" cy="100" r="56" fill="url(#companion-body)" />
-          <ellipse cx="82" cy="78" rx="21" ry="15" fill="#00d4ff" opacity="0.06" />
-        </g>
-
-        {/* Eyes. */}
-        <g className="companion__eyes">
-          <ellipse cx="84" cy="93" rx="8.4" ry="10" fill="#0e2240" />
-          <ellipse cx="116" cy="93" rx="8.4" ry="10" fill="#0e2240" />
-          <circle className="companion__pupil" cx="84" cy="93" r="4.4" fill="#1a8fff" opacity="0.7" />
-          <circle className="companion__pupil" cx="116" cy="93" r="4.4" fill="#1a8fff" opacity="0.7" />
-        </g>
-
-        {/* A brow that appears while it waits for the user. */}
-        <path className="companion__brow" d="M70 72 Q100 62 130 72" />
-
-        {/* The mouth opens when Sidekick is speaking. */}
-        <g clipPath="url(#companion-clip)">
-          <ellipse className="companion__mouth" cx="100" cy="118" rx="14" ry="2.4" fill="#3a2118" />
-        </g>
+        {/* Waiting dashed ring — slow spin */}
+        <circle className="companion__waiting-ring" cx="100" cy="100" r="80" />
       </svg>
 
       {label !== undefined ? <span className="companion__label">{label}</span> : null}
@@ -121,38 +112,34 @@ export function Companion({ state, size = 92, label, className }: CompanionProps
       <style>{`
         .companion {
           --companion-size: 92px;
-          --companion-glow: var(--accent);
-          --companion-light: #8f8be6;
-          --companion-mid: var(--accent);
-          --companion-deep: var(--coral);
+          --ring-color: #00d4ff;
           display: inline-flex;
           flex-direction: column;
           align-items: center;
           gap: var(--space-2);
           width: var(--companion-size);
-          transition: --companion-glow var(--duration-slow) linear;
         }
-        .companion[data-state='error'] {
-          --companion-glow: var(--state-danger);
-          --companion-deep: #1a0808;
-        }
-        .companion[data-state='waiting'] {
-          --companion-glow: var(--coral);
-          --companion-deep: #1a1008;
-        }
-        .companion[data-state='quiet'] {
-          --companion-glow: var(--ink-faint);
-        }
-        .companion[data-state='off'] {
-          --companion-glow: var(--ink-faint);
-          opacity: 0.4;
-        }
+
+        /* --- State ring colours --- */
+        .companion[data-state='idle']      { --ring-color: #1a8fff; }
+        .companion[data-state='listening'] { --ring-color: #00d4ff; }
+        .companion[data-state='thinking']  { --ring-color: #1a8fff; }
+        .companion[data-state='acting']    { --ring-color: #7c5fe6; }
+        .companion[data-state='waiting']   { --ring-color: #ffaa33; }
+        .companion[data-state='speaking']  { --ring-color: #00d4ff; }
+        .companion[data-state='error']     { --ring-color: #ff5252; }
+        .companion[data-state='quiet']     { --ring-color: #2a3550; }
+        .companion[data-state='off']       { --ring-color: #141e2e; opacity: 0.4; }
+
+        /* --- Art canvas --- */
         .companion__art {
           width: 100%;
           height: auto;
           overflow: visible;
           display: block;
         }
+
+        /* --- Label --- */
         .companion__label {
           font-size: var(--text-2xs);
           letter-spacing: var(--tracking-wide);
@@ -162,160 +149,166 @@ export function Companion({ state, size = 92, label, className }: CompanionProps
           text-align: center;
           line-height: 1.3;
         }
+
+        /* --- Halo: ambient outer glow, always breathing --- */
         .companion__halo {
           transform-origin: 100px 100px;
-          animation: companion-breathe 4.6s var(--ease-in-out) infinite;
+          animation: orb-breathe 4s ease-in-out infinite;
         }
-        .companion__body {
+
+        /* --- The main ring: the Alexa-style edge ring --- */
+        .companion__ring {
+          fill: none;
+          stroke: var(--ring-color);
+          stroke-width: 3.5;
+          opacity: 0.9;
           transform-origin: 100px 100px;
-          animation: companion-breathe 4.6s var(--ease-in-out) infinite;
+          filter: drop-shadow(0 0 6px var(--ring-color));
+          animation: orb-ring-idle 4s ease-in-out infinite;
         }
-        .companion__rings,
-        .companion__arcs,
-        .companion__waves,
-        .companion__waiting,
-        .companion__brow {
+
+        /* --- Pulse waves: expand outward from sphere edge --- */
+        .companion__wave {
+          fill: none;
+          stroke: var(--ring-color);
+          stroke-width: 1.5;
           opacity: 0;
-        }
-        .companion__rings circle {
-          fill: none;
-          stroke: var(--cyan);
-          stroke-width: 2.4;
           transform-origin: 100px 100px;
-        }
-        .companion__arcs {
-          fill: none;
-          stroke: var(--accent);
-          stroke-width: 3;
-          stroke-linecap: round;
-          transform-origin: 100px 100px;
-        }
-        .companion__waves circle {
-          fill: none;
-          stroke: var(--cyan);
-          stroke-width: 2.4;
-          transform-origin: 100px 100px;
-        }
-        .companion__waiting {
-          fill: none;
-          stroke: var(--state-confirm);
-          stroke-width: 3;
-          stroke-linecap: round;
-          stroke-dasharray: 10 12;
-          transform-origin: 100px 100px;
-        }
-        .companion__brow {
-          fill: none;
-          stroke: rgba(255, 255, 255, 0.85);
-          stroke-width: 3.4;
-          stroke-linecap: round;
-        }
-        .companion__mouth {
-          transform-origin: 100px 118px;
         }
 
-        .companion[data-state='listening'] .companion__rings { opacity: 1; }
-        .companion[data-state='listening'] .companion__rings circle:first-child {
-          animation: companion-ring 2s var(--ease-out) infinite;
+        /* --- Thinking arcs --- */
+        .companion__arc {
+          fill: none;
+          stroke: var(--ring-color);
+          stroke-width: 3;
+          stroke-linecap: round;
+          opacity: 0;
+          transform-origin: 100px 100px;
         }
-        .companion[data-state='listening'] .companion__rings circle:last-child {
-          animation: companion-ring 2s var(--ease-out) 1s infinite;
-        }
-        .companion[data-state='listening'] .companion__halo { animation-duration: 2.2s; }
 
-        .companion[data-state='thinking'] .companion__arcs {
+        /* --- Waiting dashed ring --- */
+        .companion__waiting-ring {
+          fill: none;
+          stroke: var(--ring-color);
+          stroke-width: 1.5;
+          stroke-dasharray: 8 14;
+          stroke-linecap: round;
+          opacity: 0;
+          transform-origin: 100px 100px;
+        }
+
+        /* ================================================
+           State-specific animations
+           ================================================ */
+
+        /* IDLE — ring gently pulses */
+        .companion[data-state='idle'] .companion__ring {
+          animation: orb-ring-idle 4s ease-in-out infinite;
+        }
+
+        /* LISTENING — cyan ring, two expanding wave pulses */
+        .companion[data-state='listening'] .companion__ring {
+          animation: orb-ring-bright 0.3s ease-out forwards;
           opacity: 1;
-          animation: companion-spin 2.4s linear infinite;
         }
-        .companion[data-state='thinking'] .companion__body {
-          animation: companion-tilt 2.4s var(--ease-in-out) infinite;
+        .companion[data-state='listening'] .companion__wave--1 {
+          animation: orb-wave 2s ease-out infinite;
+        }
+        .companion[data-state='listening'] .companion__wave--2 {
+          animation: orb-wave 2s ease-out 1s infinite;
         }
 
-        .companion[data-state='acting'] .companion__body {
-          animation: companion-work 900ms var(--ease-in-out) infinite;
+        /* THINKING — arc rotates */
+        .companion[data-state='thinking'] .companion__arc {
+          opacity: 1;
+          animation: orb-spin 2s linear infinite;
+        }
+        .companion[data-state='thinking'] .companion__ring {
+          opacity: 0.4;
+          animation: orb-ring-idle 2s ease-in-out infinite;
+        }
+
+        /* ACTING — ring pulses fast, purple */
+        .companion[data-state='acting'] .companion__ring {
+          animation: orb-ring-pulse 1.2s ease-in-out infinite;
         }
         .companion[data-state='acting'] .companion__halo {
-          animation: companion-pulse 1.5s var(--ease-in-out) infinite;
+          animation: orb-breathe 1.2s ease-in-out infinite;
         }
 
-        .companion[data-state='waiting'] .companion__waiting {
+        /* WAITING — dashed outer ring spins slowly */
+        .companion[data-state='waiting'] .companion__waiting-ring {
+          opacity: 0.7;
+          animation: orb-spin 12s linear infinite;
+        }
+        .companion[data-state='waiting'] .companion__ring {
+          opacity: 0.5;
+        }
+
+        /* SPEAKING — wave ripples + bright ring */
+        .companion[data-state='speaking'] .companion__ring {
+          animation: orb-ring-pulse 0.9s ease-in-out infinite;
           opacity: 1;
-          animation: companion-spin 14s linear infinite;
         }
-        .companion[data-state='waiting'] .companion__brow { opacity: 1; }
-
-        .companion[data-state='speaking'] .companion__mouth {
-          animation: companion-talk 420ms var(--ease-in-out) infinite;
+        .companion[data-state='speaking'] .companion__wave--1 {
+          animation: orb-wave 1.4s ease-out infinite;
         }
-        .companion[data-state='speaking'] .companion__waves { opacity: 1; }
-        .companion[data-state='speaking'] .companion__waves circle:first-child {
-          animation: companion-wave 1.3s var(--ease-out) infinite;
-        }
-        .companion[data-state='speaking'] .companion__waves circle:last-child {
-          animation: companion-wave 1.3s var(--ease-out) 0.45s infinite;
-        }
-        .companion[data-state='speaking'] .companion__body {
-          animation: companion-breathe 1.8s var(--ease-in-out) infinite;
+        .companion[data-state='speaking'] .companion__wave--2 {
+          animation: orb-wave 1.4s ease-out 0.5s infinite;
         }
 
-        .companion[data-state='quiet'] .companion__halo { opacity: 0.35; }
-        .companion[data-state='quiet'] .companion__mouth { transform: scaleY(0.4); }
+        /* ERROR — ring flashes red */
+        .companion[data-state='error'] .companion__ring {
+          animation: orb-ring-pulse 0.6s ease-in-out 3;
+        }
 
-        .companion[data-state='error'] .companion__body {
-          animation: companion-shake 520ms var(--ease-out);
+        /* QUIET — dim ring, no animation */
+        .companion[data-state='quiet'] .companion__ring {
+          animation: none;
+          opacity: 0.25;
         }
-        .companion[data-state='error'] .companion__brow { opacity: 1; }
+        .companion[data-state='quiet'] .companion__halo {
+          animation: none;
+          opacity: 0.1;
+        }
 
-        .companion[data-state='off'] .companion__body,
-        .companion[data-state='off'] .companion__halo { animation: none; }
+        /* OFF */
+        .companion[data-state='off'] .companion__ring  { opacity: 0.1; animation: none; }
+        .companion[data-state='off'] .companion__halo  { animation: none; }
 
-        @keyframes companion-breathe {
-          0%, 100% { transform: scale(1); }
-          50% { transform: scale(1.03); }
+        /* ================================================
+           Keyframes
+           ================================================ */
+        @keyframes orb-breathe {
+          0%, 100% { transform: scale(1);    opacity: 0.7; }
+          50%       { transform: scale(1.06); opacity: 1;   }
         }
-        @keyframes companion-pulse {
-          0%, 100% { transform: scale(1); opacity: 0.85; }
-          50% { transform: scale(1.08); opacity: 1; }
+        @keyframes orb-ring-idle {
+          0%, 100% { opacity: 0.55; filter: drop-shadow(0 0 4px var(--ring-color)); }
+          50%       { opacity: 0.9;  filter: drop-shadow(0 0 10px var(--ring-color)); }
         }
-        @keyframes companion-ring {
-          0% { transform: scale(0.88); opacity: 0.8; }
-          70% { transform: scale(1.24); opacity: 0; }
-          100% { transform: scale(1.24); opacity: 0; }
+        @keyframes orb-ring-bright {
+          to { opacity: 1; filter: drop-shadow(0 0 12px var(--ring-color)); }
         }
-        @keyframes companion-wave {
-          0% { transform: scale(0.9); opacity: 0.7; }
-          70% { transform: scale(1.16); opacity: 0; }
-          100% { transform: scale(1.16); opacity: 0; }
+        @keyframes orb-ring-pulse {
+          0%, 100% { opacity: 0.7;  filter: drop-shadow(0 0 5px var(--ring-color));  }
+          50%       { opacity: 1;   filter: drop-shadow(0 0 16px var(--ring-color)); }
         }
-        @keyframes companion-spin {
+        @keyframes orb-wave {
+          0%   { transform: scale(1);    opacity: 0.6; }
+          80%  { transform: scale(1.38); opacity: 0;   }
+          100% { transform: scale(1.38); opacity: 0;   }
+        }
+        @keyframes orb-spin {
           to { transform: rotate(360deg); }
-        }
-        @keyframes companion-tilt {
-          0%, 100% { transform: rotate(-3deg); }
-          50% { transform: rotate(3deg); }
-        }
-        @keyframes companion-work {
-          0%, 100% { transform: translateY(0) scale(1); }
-          50% { transform: translateY(-4px) scale(1.02); }
-        }
-        @keyframes companion-talk {
-          0%, 100% { transform: scaleY(0.5); }
-          50% { transform: scaleY(3); }
-        }
-        @keyframes companion-shake {
-          0%, 100% { transform: translateX(0); }
-          25% { transform: translateX(-4px); }
-          75% { transform: translateX(4px); }
         }
 
         @media (prefers-reduced-motion: reduce) {
+          .companion__ring,
           .companion__halo,
-          .companion__body,
-          .companion__rings circle,
-          .companion__arcs,
-          .companion__waves circle,
-          .companion__waiting,
-          .companion__mouth {
+          .companion__wave,
+          .companion__arc,
+          .companion__waiting-ring {
             animation: none !important;
           }
         }
