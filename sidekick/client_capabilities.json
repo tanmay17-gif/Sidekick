@@ -1,4 +1,4 @@
-﻿{
+{
   "owner": "agent3",
   "note": "Capabilities that the browser client executes locally. The core plans them and reports them honestly; the client runs them and reports the outcome back through POST /v1/actions/{id}/complete. Agent 3 owns this file - the core only reads it.",
   "capabilities": [

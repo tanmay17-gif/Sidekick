@@ -414,11 +414,10 @@ class WebSearchTool:
             "browse for",
             "what is",
             "who is",
-            # Flight / travel searches
+            # Flight / travel search (searching flights on web, not booking)
             "find flight",
             "find flights",
             "find a flight",
-            "book flight",
             "search for flight",
             "search flights",
             "flight from",
