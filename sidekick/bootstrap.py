@@ -16,6 +16,16 @@ import json
 import os
 from pathlib import Path
 
+# Load .env from the project root so that AWS credentials, SIDEKICK_EXECUTION_URL
+# and all other settings are available when the core brain initialises.
+try:
+    from dotenv import load_dotenv as _load_dotenv
+    _env_path = Path(__file__).resolve().parent.parent / ".env"
+    if _env_path.exists():
+        _load_dotenv(dotenv_path=str(_env_path), override=False)
+except Exception:  # noqa: BLE001
+    pass
+
 from .core.catalog import (
     CAPTURE_AUTO,
     CAPTURE_REMAINDER,

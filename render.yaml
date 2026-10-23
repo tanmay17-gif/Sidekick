@@ -1,0 +1,57 @@
+# Render Blueprint — deploys Sidekick as a single Web Service.
+# The FastAPI backend serves both the API and the built React frontend.
+# The execution service starts as a background process inside the same dyno.
+#
+# How to deploy:
+#   1. Push this file to your GitHub repo (main branch)
+#   2. Go to https://dashboard.render.com → New → Blueprint
+#   3. Connect your GitHub repo
+#   4. Render reads this file and creates the service automatically
+#   5. Add your secret env vars in the Render dashboard
+services:
+  - type: web
+    name: sidekick
+    runtime: python
+    region: oregon
+    plan: free          # upgrade to starter ($7/mo) for always-on
+    branch: main
+
+    buildCommand: bash build.sh
+    startCommand: bash start.sh
+
+    healthCheckPath: /healthz
+
+    envVars:
+      # ── Core settings ───────────────────────────────────────────────────────
+      - key: SIDEKICK_DECISION_MODEL
+        value: auto
+      - key: LOG_LEVEL
+        value: info
+      - key: SIDEKICK_WORKSPACE
+        value: /tmp/sidekick_runtime
+      - key: SIDEKICK_EXEC_PORT
+        value: "8088"
+      - key: SIDEKICK_EXECUTION_URL
+        value: http://127.0.0.1:8088
+
+      # ── Coding provider: Bedrock (set in dashboard, not here) ───────────────
+      - key: SIDEKICK_PROVIDER
+        value: bedrock
+      - key: AWS_REGION
+        value: us-east-1
+      - key: BEDROCK_MODEL_ID
+        value: qwen.qwen3-coder-30b-a3b-v1:0
+      # AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY → add as Secret in dashboard
+
+      # ── Movie Buddy (Groq) → add VITE_GROQ_API_KEY as Secret in dashboard ──
+      - key: VITE_GROQ_MODEL
+        value: openai/gpt-oss-120b
+      - key: VITE_GROQ_API_ENDPOINT
+        value: https://api.groq.com/openai/v1/chat/completions
+
+      # ── Alexa Skill (optional, for request verification) ────────────────────
+      # ALEXA_SKILL_ID → add as Secret in dashboard
+
+      # ── Node/npm for the build step ─────────────────────────────────────────
+      - key: NODE_VERSION
+        value: "20"
