@@ -33,7 +33,7 @@ jobs:
         run: python scripts/check_packaging.py --build
 
       - name: Run contract checks
-        run: python -m pytest tests/test_core_contract.py tests/test_contract_compat.py tests/test_execution_contract.py tests/test_client_contract.py -v
+        run: python -m pytest tests/test_core_contract.py tests/test_contract_compat.py tests/test_execution_contract.py tests/test_client_contract.py -vv -ra --showlocals
 
       - name: Run full backend test suite
         run: python -m pytest tests/ -v
