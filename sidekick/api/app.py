@@ -579,8 +579,13 @@ def main() -> None:  # pragma: no cover - process entry point
 
     host = os.environ.get("SIDEKICK_HOST", "127.0.0.1")
     port = int(os.environ.get("SIDEKICK_PORT", "8000"))
-    uvicorn.run(create_app(), host=host, port=port)
+    uvicorn.run("sidekick.api.app:app", host=host, port=port, reload=False)
 
 
 if __name__ == "__main__":  # pragma: no cover
     main()
+
+
+# Module-level application instance. Uvicorn can reference this as
+# ``sidekick.api.app:app`` (e.g. ``uvicorn sidekick.api.app:app``).
+app = create_app()

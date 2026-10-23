@@ -1,68 +1,71 @@
-{
+﻿{
   "owner": "agent3",
   "note": "Capabilities that the browser client executes locally. The core plans them and reports them honestly; the client runs them and reports the outcome back through POST /v1/actions/{id}/complete. Agent 3 owns this file - the core only reads it.",
   "capabilities": [
     {
       "id": "movie.play",
       "label": "play a movie",
-      "detail": "The browser client plays the movie. The core plans it and waits for the client's report; it does not play anything itself.",
+      "detail": "The browser client plays the movie. The core plans it and waits for the client report; it does not play anything itself.",
       "aliases": [
         "play a movie",
         "watch a movie",
         "find a movie",
         "put on a film",
-        "start the movie"
+        "start the movie",
+        "show me a movie",
+        "watch something",
+        "play the movie"
       ],
       "arguments": [
-        {
-          "name": "title",
-          "type": "string",
-          "required": false,
-          "description": "which film to play"
-        }
+        { "name": "title", "type": "string", "required": false, "description": "which film to play" }
       ],
       "speech_template": "Playing {title}."
     },
     {
       "id": "media.play",
       "label": "play music",
-      "detail": "The browser client plays the music. The core plans it and waits for the client's report; it does not play anything itself.",
+      "detail": "The browser client plays the music. The core plans it and waits for the client report; it does not play anything itself.",
       "aliases": [
         "play some music",
         "play music",
         "play some",
         "put on some music",
         "listen to music",
-        "play a song"
+        "play a song",
+        "play a track",
+        "play some songs"
       ],
       "arguments": [
-        {
-          "name": "query",
-          "type": "string",
-          "required": false,
-          "description": "what to play"
-        }
+        { "name": "query", "type": "string", "required": false, "description": "what to play" }
       ],
       "speech_template": "Playing {query}."
     },
     {
       "id": "game.start",
       "label": "play a game",
-      "detail": "The browser client starts the game. The core plans it and waits for the client's report; it does not start anything itself.",
+      "detail": "The browser client starts the game. The core plans it and waits for the client report; it does not start anything itself.",
       "aliases": [
         "start a game",
         "play a game",
         "play chess",
         "start chess",
-        "let's play chess"
+        "let us play chess",
+        "play tic tac toe",
+        "start tic tac toe",
+        "let us play tic tac toe",
+        "play tictactoe",
+        "tic tac toe",
+        "play 2048",
+        "start 2048",
+        "play the 2048 game",
+        "let us play 2048",
+        "play a game with me",
+        "play against me",
+        "start a board game",
+        "let us play a game"
       ],
       "arguments": [
-        {
-          "name": "game",
-          "type": "string",
-          "required": false,
-          "description": "which game to start"
-        }
+        { "name": "game", "type": "string", "required": false, "description": "which game to start (chess, tic-tac-toe, 2048)" }
       ],
       "speech_template": "Starting {game}."
     }

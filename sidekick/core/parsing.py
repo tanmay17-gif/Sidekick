@@ -119,6 +119,8 @@ def split_segments(text: str) -> list[Segment]:
 _CORRECTION_MARKERS: tuple[str, ...] = (
     "no wait",
     "no no",
+    "no make it",
+    "no actually",
     "wait",
     "actually",
     "instead",
@@ -132,6 +134,7 @@ _CORRECTION_MARKERS: tuple[str, ...] = (
     "forget that",
     "make it",
     "change it to",
+    "change to",
     "switch to",
     "instead of",
 )
@@ -139,6 +142,9 @@ _CORRECTION_MARKERS: tuple[str, ...] = (
 # Markers that introduce a *replacement* rather than a modification.
 _REPLACEMENT_MARKERS: tuple[str, ...] = (
     "no wait",
+    "no no",
+    "no make it",
+    "no actually",
     "actually",
     "instead",
     "rather",
@@ -148,6 +154,9 @@ _REPLACEMENT_MARKERS: tuple[str, ...] = (
     "never mind",
     "nevermind",
     "forget that",
+    "make it",
+    "change it to",
+    "change to",
     "switch to",
     "instead of",
 )

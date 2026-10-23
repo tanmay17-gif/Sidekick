@@ -110,13 +110,15 @@ export function VoiceSurface(props: VoiceSurfaceProps) {
       <div className="voice-surface__exchange" ref={scrollRef}>
         {requests.length === 0 ? (
           <div className="voice-surface__intro">
-            <p className="voice-surface__intro-title">Try one of these</p>
+            <p className="voice-surface__intro-title">Try asking me…</p>
             <ul>
               {[
-                'Play a song on Spotify',
-                'Open YouTube and play a song - no wait, Spotify',
+                'Play a game of Chess with me',
+                'Find flights from New York to London tomorrow at 8pm',
+                'Write code to add a dark mode toggle',
+                'Play music on Spotify',
+                'Set a reminder in 20 minutes',
                 'Turn on Movie Buddy',
-                'What just happened?',
               ].map((suggestion) => (
                 <li key={suggestion}>
                   <button

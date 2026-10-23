@@ -392,6 +392,37 @@ class DecisionEngine:
                 decision.confidence = max(decision.confidence, previous.confidence * 0.9)
                 support_text = correction.preceding
 
+        # When a time-only correction ("no make it 10pm") would route to
+        # reminder.set but the *preceding* instruction was a different action
+        # (e.g., a flight search), keep the preceding action and reconstruct
+        # the query with the corrected time so the user gets a corrected
+        # search, not an unwanted reminder.
+        if (
+            correction.is_correction
+            and correction.preceding
+            and find_when_expression(text) is not None
+        ):
+            previous, _ = self._decide(self._query(correction.preceding, session))
+            previous = self._anchor_to_utterance(previous, correction.preceding, session)
+            if (
+                previous.tool
+                and not self._is_control(previous.tool)
+                and previous.tool != "reminder.set"
+            ):
+                # The corrected residue is a time update to a non-reminder action.
+                # Reconstruct the segment text with the corrected time so that
+                # argument binding picks the right time value.
+                when_expr = find_when_expression(correction.preceding)
+                corrected_time = find_when_expression(text) or text.strip()
+                if when_expr:
+                    reconstructed = correction.preceding.replace(when_expr, corrected_time)
+                else:
+                    reconstructed = f"{correction.preceding} at {corrected_time}"
+                decision.tool = previous.tool
+                decision.confidence = max(decision.confidence, previous.confidence * 0.9)
+                support_text = reconstructed
+                text = reconstructed
+
         decision = self._anchor_to_utterance(decision, support_text, session)
         anchor = decision.details.get("anchor")
         if anchor:
