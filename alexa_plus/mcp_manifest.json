@@ -1,5 +1,4 @@
 {
-  "$schema": "https://modelcontextprotocol.io/specification/2025-11-25/schema.json",
   "name": "sidekick-alexa-plus",
   "version": "1.0.0",
   "title": "Sidekick: Voice-First AI Developer Companion for Alexa+",

@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { Speaker } from '@/lib/voice/synthesis'
 
 interface MCPTool {
@@ -40,7 +40,7 @@ export function AlexaPlusSimulator({
   const [tools, setTools] = useState<MCPTool[]>([])
   const [protocolVersion, setProtocolVersion] = useState<string>('2025-11-25')
   const [serverInfo, setServerInfo] = useState<{ name: string; version: string } | null>(null)
-  const [sessionId, setSessionId] = useState<string>('alexa-sim-' + Math.random().toString(36).slice(2, 9))
+  const sessionId = useRef<string>('alexa-sim-' + Math.random().toString(36).slice(2, 9)).current
   const [customInput, setCustomInput] = useState<string>('')
   const [running, setRunning] = useState<boolean>(false)
   const [logs, setLogs] = useState<StepLog[]>([])
