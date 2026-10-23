@@ -1,0 +1,158 @@
+{
+  "$schema": "https://modelcontextprotocol.io/specification/2025-11-25/schema.json",
+  "name": "sidekick-alexa-plus",
+  "version": "1.0.0",
+  "title": "Sidekick: Voice-First AI Developer Companion for Alexa+",
+  "description": "Exposes workspace inspection, test execution, git operations, and approval-gated code modifications to Alexa+ through standard Model Context Protocol (MCP 2025-11-25) over Streamable HTTP.",
+  "runtime": {
+    "protocolVersion": "2025-11-25",
+    "transport": "streamable-http",
+    "endpoint": "/mcp",
+    "supportedTransports": ["streamable-http", "stdio"]
+  },
+  "capabilities": {
+    "tools": {
+      "listChanged": false
+    },
+    "logging": {}
+  },
+  "authentication": {
+    "type": "bearer",
+    "environmentVariable": "SIDEKICK_MCP_TOKEN",
+    "requiredForExternal": true
+  },
+  "tools": [
+    {
+      "name": "coding.execute",
+      "title": "Execute Code Changes",
+      "risk": "HIGH",
+      "requiresApproval": true,
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "idempotentHint": false,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "coding.run_tests",
+      "title": "Run Project Test Suite",
+      "risk": "LOW",
+      "requiresApproval": false,
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "workspace.inspect",
+      "title": "Inspect Workspace Directory",
+      "risk": "LOW",
+      "requiresApproval": false,
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "vcs.diff",
+      "title": "Git Diff Workspace",
+      "risk": "LOW",
+      "requiresApproval": false,
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "vcs.commit",
+      "title": "Create Git Commit",
+      "risk": "MEDIUM",
+      "requiresApproval": true,
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "system.info",
+      "title": "System Runtime Info",
+      "risk": "LOW",
+      "requiresApproval": false,
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "system.volume",
+      "title": "Control System Volume",
+      "risk": "MEDIUM",
+      "requiresApproval": false,
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "system.media_control",
+      "title": "Media Playback Control",
+      "risk": "LOW",
+      "requiresApproval": false,
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "system.open",
+      "title": "Open File or URL",
+      "risk": "MEDIUM",
+      "requiresApproval": false,
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "system.clipboard",
+      "title": "System Clipboard Access",
+      "risk": "MEDIUM",
+      "requiresApproval": false,
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "web.fetch",
+      "title": "Fetch Web Resource",
+      "risk": "LOW",
+      "requiresApproval": false,
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    }
+  ]
+}

@@ -10,17 +10,9 @@ import { GamesPanel } from './components/GamesPanel'
 import { MovieBuddy } from './components/MovieBuddy'
 import { SidekickMark } from './components/icons'
 import { VoiceSurface } from './components/VoiceSurface'
+import { AlexaPlusSimulator } from './components/AlexaPlusSimulator'
 
-/**
- * Sidekick has two interfaces and one session.
- *
- * Interface A (Ask / Movie Buddy / Games) is the conversational surface a person talks
- * to. Interface B (Control room) is the developer view of the same work. Both
- * read the same request list, the same session id and the same event stream -
- * they are two views of one real session, not two demos.
- */
-
-type View = 'ask' | 'movie' | 'games' | 'control'
+type View = 'ask' | 'alexa-plus' | 'movie' | 'games' | 'control'
 
 export function App() {
   const sidekick = useSidekick()
@@ -200,6 +192,23 @@ export function App() {
           <button
             type="button"
             className="app__view"
+            aria-current={view === 'alexa-plus' ? 'page' : undefined}
+            onClick={() => setView('alexa-plus')}
+          >
+            Alexa+ Simulator
+          </button>
+          <button
+            type="button"
+            className="app__view app__view--tech"
+            aria-current={view === 'control' ? 'page' : undefined}
+            onClick={() => setView('control')}
+          >
+            Developer
+          </button>
+          <span className="app__divider" aria-hidden="true" />
+          <button
+            type="button"
+            className="app__view"
             aria-current={view === 'movie' ? 'page' : undefined}
             onClick={() => setView('movie')}
           >
@@ -212,15 +221,6 @@ export function App() {
             onClick={() => setView('games')}
           >
             Games
-          </button>
-          <span className="app__divider" aria-hidden="true" />
-          <button
-            type="button"
-            className="app__view app__view--tech"
-            aria-current={view === 'control' ? 'page' : undefined}
-            onClick={() => setView('control')}
-          >
-            Developer
           </button>
         </nav>
 
@@ -267,6 +267,10 @@ export function App() {
             onApprove={approve}
             onCancelAction={cancelAction}
           />
+        ) : null}
+
+        {view === 'alexa-plus' ? (
+          <AlexaPlusSimulator speaker={speaker} speechEnabled={sidekick.speakEnabled} />
         ) : null}
 
         {view === 'movie' ? (
