@@ -333,7 +333,7 @@ export function useMovieBuddy(options: UseMovieBuddyOptions): UseMovieBuddyResul
   }, [])
 
   const handlePlaying = useCallback(() => {
-    setPlayer((current) => ({ ...current, buffering: false, paused: false, ended: false }))
+    setPlayer((current) => ({ ...current, buffering: false, paused: false, ended: false, mediaError: null }))
   }, [])
 
   const handleEnded = useCallback(() => {
@@ -344,11 +344,23 @@ export function useMovieBuddy(options: UseMovieBuddyOptions): UseMovieBuddyResul
     const video = videoRef.current
     if (!video) return
     if (video.paused) {
-      void video.play().catch(() => {
-        setPlayer((current) => ({
-          ...current,
-          mediaError: 'Playback was blocked by the browser. Press play to start.',
-        }))
+      setPlayer((current) => ({ ...current, mediaError: null }))
+      void video.play().catch((err: unknown) => {
+        const error = err as { name?: string } | undefined
+        if (error?.name === 'NotAllowedError') {
+          video.muted = true
+          void video.play().catch(() => {
+            setPlayer((current) => ({
+              ...current,
+              mediaError: 'Playback was blocked by the browser. Press play to start.',
+            }))
+          })
+        } else {
+          setPlayer((current) => ({
+            ...current,
+            mediaError: 'Playback was blocked by the browser. Press play to start.',
+          }))
+        }
       })
     } else {
       video.pause()

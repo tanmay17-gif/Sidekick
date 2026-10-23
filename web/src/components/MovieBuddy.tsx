@@ -315,24 +315,33 @@ export function MovieBuddy({
                     ⚠️ {buddy.player.mediaError}
                   </p>
                   <p className="hint" style={{ marginBottom: 16 }}>
-                    Your browser couldn&apos;t play that format. Try loading a video from your device, or open a streaming film directly.
+                    Press play to start playback with sound, switch films, or open a video from your device.
                   </p>
                   <div style={{ display: 'flex', gap: 8, justifyContent: 'center', flexWrap: 'wrap' }}>
                     <button
                       type="button"
                       className="btn btn--primary btn--sm"
+                      onClick={() => buddy.togglePlay()}
+                    >
+                      ▶️ Play Now
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn--sm"
+                      onClick={() => {
+                        const streamed = assets.find((a) => a.id === 'tears-of-steel')
+                        if (streamed) setAssetId(streamed.id)
+                      }}
+                    >
+                      🎬 Switch to Tears of Steel
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn--sm"
                       onClick={() => fileInputRef.current?.click()}
                     >
                       📂 Open a local video
                     </button>
-                    <a
-                      href="https://archive.org/download/Tears-of-Steel/tears_of_steel_720p.mp4"
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="btn btn--sm"
-                    >
-                      🎬 Open Tears of Steel (CC)
-                    </a>
                   </div>
                 </div>
               </div>

@@ -67,6 +67,12 @@ def create_app(engine: DecisionEngine | None = None, alexa_verifier: Any = None)
     # only the backend's placeholder page. The build is Agent 3's; the core
     # only serves it.
     web_dist = Path(__file__).resolve().parents[2] / "web" / "dist"
+    web_public = Path(__file__).resolve().parents[2] / "web" / "public"
+
+    media_dir = web_dist / "media" if (web_dist / "media").is_dir() else (web_public / "media")
+    if media_dir.is_dir():
+        app.mount("/media", StaticFiles(directory=str(media_dir)), name="web-media")
+
     if (web_dist / "index.html").exists():
         assets = web_dist / "assets"
         if assets.is_dir():
@@ -551,6 +557,13 @@ def create_app(engine: DecisionEngine | None = None, alexa_verifier: Any = None)
             raise HTTPException(status_code=404, detail="not found")
         if path.startswith(("api/", "v1/", "static/", "healthz")):
             raise HTTPException(status_code=404, detail="not found")
+        # Direct static file check (for media, favicon, etc.)
+        dist_file = web_dist / path
+        if dist_file.is_file():
+            return FileResponse(str(dist_file))
+        pub_file = web_public / path
+        if pub_file.is_file():
+            return FileResponse(str(pub_file))
         return FileResponse(str(client_index))
 
     return app
