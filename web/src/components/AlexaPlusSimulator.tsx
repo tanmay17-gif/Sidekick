@@ -91,7 +91,7 @@ function LogEntry({ log }: { log: StepLog }) {
           {summary}
         </div>
       )}
-      {log.rawJson && (
+      {Boolean(log.rawJson) && (
         <button
           type="button"
           onClick={() => setExpanded((v) => !v)}
@@ -109,7 +109,7 @@ function LogEntry({ log }: { log: StepLog }) {
           {expanded ? '▲ Hide raw JSON' : '▼ View raw JSON'}
         </button>
       )}
-      {expanded && log.rawJson && (
+      {expanded && Boolean(log.rawJson) && (
         <pre
           style={{
             margin: '4px 0 0',
