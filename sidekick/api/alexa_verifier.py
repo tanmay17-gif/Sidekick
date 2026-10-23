@@ -31,7 +31,7 @@ try:
     from ask_sdk_core.serialize import DefaultSerializer
     from ask_sdk_model import RequestEnvelope
     _ASK_SDK_AVAILABLE = True
-except ImportError:  # pragma: no cover
+except (ImportError, Exception):  # pragma: no cover
     _ASK_SDK_AVAILABLE = False
     RequestVerifier = None  # type: ignore[assignment, misc]
     TimestampVerifier = None  # type: ignore[assignment, misc]

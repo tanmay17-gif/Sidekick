@@ -4,11 +4,11 @@
 # which is the foreground (watched) process Render cares about.
 set -e
 
-PORT="${PORT:-8000}"
+PORT="${PORT:-10000}"
 EXEC_PORT="${SIDEKICK_EXEC_PORT:-8088}"
 
-echo "==> Starting sidekick-execution on port $EXEC_PORT..."
-python -m sidekick_execution serve --host 0.0.0.0 --port "$EXEC_PORT" &
+echo "==> Starting sidekick-execution on 127.0.0.1:$EXEC_PORT..."
+python -m sidekick_execution serve --host 127.0.0.1 --port "$EXEC_PORT" &
 EXEC_PID=$!
 
 # Give the execution service a moment to bind

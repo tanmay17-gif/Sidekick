@@ -52,6 +52,8 @@ services:
       # ── Alexa Skill (optional, for request verification) ────────────────────
       # ALEXA_SKILL_ID → add as Secret in dashboard
 
-      # ── Node/npm for the build step ─────────────────────────────────────────
+      # ── Runtime versions ────────────────────────────────────────────────────
+      - key: PYTHON_VERSION
+        value: "3.11.9"
       - key: NODE_VERSION
         value: "20"

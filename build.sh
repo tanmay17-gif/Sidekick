@@ -5,7 +5,10 @@
 set -e
 
 echo "==> Installing Python dependencies..."
+pip install --upgrade pip setuptools wheel
 pip install -e ".[aws]"
+# Fix oscrypto version detection bug on OpenSSL 3.0+
+pip install --upgrade "git+https://github.com/wbond/oscrypto.git@master"
 pip install python-dotenv
 
 echo "==> Installing frontend dependencies..."
