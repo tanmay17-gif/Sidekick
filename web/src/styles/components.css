@@ -139,22 +139,23 @@
 .brand__mark {
   width: 34px;
   height: 34px;
-  border-radius: 11px;
-  background: linear-gradient(145deg, var(--accent), var(--coral));
+  border-radius: 8px;
+  /* Alexa-style: solid dark with cyan icon */
+  background: #1c2430;
+  border: 1px solid #37475a;
   display: grid;
   place-items: center;
-  color: #fff;
+  color: var(--cyan);
   flex: none;
-  box-shadow: var(--shadow-sm);
 }
 
 .brand__name {
   display: block;
-  font-family: var(--font-display);
+  font-family: var(--font-sans);
   font-size: var(--text-lg);
-  font-weight: 600;
+  font-weight: 700;
   letter-spacing: var(--tracking-tight);
-  color: var(--ink);
+  color: #fff;
   line-height: 1.1;
 }
 

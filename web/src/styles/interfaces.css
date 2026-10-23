@@ -12,10 +12,7 @@
   display: flex;
   flex-direction: column;
   min-height: 100%;
-  background:
-    radial-gradient(1200px 560px at 20% -14%, rgba(91, 87, 201, 0.08), transparent 64%),
-    radial-gradient(820px 460px at 98% 2%, rgba(222, 106, 79, 0.06), transparent 62%),
-    var(--canvas);
+  background: var(--canvas);
 }
 
 .app__bar {
@@ -26,9 +23,9 @@
   align-items: center;
   gap: var(--space-4);
   padding: var(--space-3) var(--space-5);
-  background: rgba(255, 255, 255, 0.86);
-  backdrop-filter: blur(12px);
-  border-bottom: 1px solid var(--line);
+  /* Amazon #131921 — their exact dark nav colour */
+  background: #131921;
+  border-bottom: 1px solid #232f3e;
 }
 
 .app__brand {
@@ -44,38 +41,37 @@
   gap: var(--space-1);
   margin: 0 auto;
   padding: 3px;
-  border-radius: var(--radius-pill);
-  background: var(--surface-2);
-  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: #232f3e;
+  border: 1px solid #37475a;
 }
 
 .app__view {
   padding: var(--space-1) var(--space-4);
-  border-radius: var(--radius-pill);
+  border-radius: 4px;
   font-size: var(--text-sm);
-  font-weight: 500;
-  color: var(--ink-muted);
+  font-weight: 400;
+  color: #d5dbdb;
   transition:
     background var(--duration-fast) var(--ease-out),
-    color var(--duration-fast) var(--ease-out),
-    box-shadow var(--duration-fast) var(--ease-out);
+    color var(--duration-fast) var(--ease-out);
   white-space: nowrap;
 }
 
 .app__view:hover {
-  color: var(--ink);
+  color: #fff;
+  background: #37475a;
 }
 
 .app__view[aria-current='page'] {
-  background: var(--surface);
-  color: var(--ink);
+  background: var(--accent);
+  color: #131921;
   font-weight: 600;
-  box-shadow: var(--shadow-sm);
 }
 
 .app__view--tech[aria-current='page'] {
-  background: var(--ink);
-  color: var(--canvas);
+  background: #37475a;
+  color: #fff;
 }
 
 .app__divider {
@@ -232,10 +228,11 @@
   display: inline-block;
   padding: var(--space-2) var(--space-4);
   margin: var(--space-1);
-  border-radius: var(--radius-pill);
-  border: 1px solid var(--line);
-  background: var(--surface);
-  color: var(--ink-secondary);
+  /* Amazon button: solid border, flat, no radius excess */
+  border-radius: 3px;
+  border: 1px solid #37475a;
+  background: #1c2430;
+  color: #a8b4d0;
   font-size: var(--text-sm);
   transition:
     border-color var(--duration-fast) var(--ease-out),
@@ -244,9 +241,9 @@
 }
 
 .voice-surface__suggestion:hover {
-  border-color: var(--accent);
-  color: var(--accent-deep);
-  background: var(--accent-soft);
+  border-color: var(--cyan);
+  color: var(--cyan);
+  background: #0e1a24;
 }
 
 .voice-surface__live {
@@ -997,8 +994,8 @@
   border-radius: 50%;
   display: grid;
   place-items: center;
-  border: 1px solid var(--line-strong);
-  background: var(--surface-2);
+  border: 1px solid #37475a;
+  background: #1c2430;
   color: var(--ink-secondary);
   transition:
     background var(--duration-base) var(--ease-out),
@@ -1009,9 +1006,9 @@
 }
 
 .mic-button:hover:not(:disabled) {
-  color: var(--accent);
-  border-color: var(--accent);
-  background: var(--accent-soft);
+  color: var(--cyan);
+  border-color: var(--cyan);
+  background: rgba(0, 212, 255, 0.08);
 }
 
 .mic-button:active:not(:disabled) {
@@ -1023,24 +1020,25 @@
   cursor: not-allowed;
 }
 
+/* Alexa cyan ring when listening */
 .mic-button[data-mode='listening'] {
-  background: var(--accent);
-  border-color: var(--accent);
-  color: #fff;
-  box-shadow: 0 0 0 6px var(--accent-wash);
+  background: var(--cyan);
+  border-color: var(--cyan);
+  color: #0a0d14;
+  box-shadow: 0 0 0 6px rgba(0, 212, 255, 0.18);
 }
 
 .mic-button[data-mode='speaking'] {
-  background: var(--coral-soft);
+  background: rgba(255, 170, 51, 0.12);
   border-color: var(--coral);
-  color: var(--coral-ink);
+  color: var(--coral);
 }
 
 .mic-button__pulse {
   position: absolute;
   inset: -6px;
   border-radius: 50%;
-  border: 1px solid var(--accent);
+  border: 1px solid var(--cyan);
   opacity: 0;
   pointer-events: none;
 }
@@ -1201,14 +1199,14 @@
   align-items: center;
   gap: var(--space-2);
   padding: 3px var(--space-3);
-  border-radius: var(--radius-pill);
-  border: 1px solid var(--line);
-  background: var(--surface);
+  border-radius: 3px;
+  border: 1px solid #37475a;
+  background: #232f3e;
   font-size: var(--text-2xs);
   font-weight: 700;
   letter-spacing: var(--tracking-wide);
   text-transform: uppercase;
-  color: var(--ink-muted);
+  color: #d5dbdb;
   cursor: default;
 }
 

@@ -96,15 +96,15 @@ export function Companion({ state, size = 92, label, className }: CompanionProps
         {/* The body. */}
         <g className="companion__body">
           <circle cx="100" cy="100" r="56" fill="url(#companion-body)" />
-          <ellipse cx="82" cy="78" rx="21" ry="15" fill="#ffffff" opacity="0.2" />
+          <ellipse cx="82" cy="78" rx="21" ry="15" fill="#00d4ff" opacity="0.06" />
         </g>
 
         {/* Eyes. */}
         <g className="companion__eyes">
-          <ellipse cx="84" cy="93" rx="8.4" ry="10" fill="#fffdf9" />
-          <ellipse cx="116" cy="93" rx="8.4" ry="10" fill="#fffdf9" />
-          <circle className="companion__pupil" cx="84" cy="93" r="4.4" fill="#241f1b" />
-          <circle className="companion__pupil" cx="116" cy="93" r="4.4" fill="#241f1b" />
+          <ellipse cx="84" cy="93" rx="8.4" ry="10" fill="#0e2240" />
+          <ellipse cx="116" cy="93" rx="8.4" ry="10" fill="#0e2240" />
+          <circle className="companion__pupil" cx="84" cy="93" r="4.4" fill="#1a8fff" opacity="0.7" />
+          <circle className="companion__pupil" cx="116" cy="93" r="4.4" fill="#1a8fff" opacity="0.7" />
         </g>
 
         {/* A brow that appears while it waits for the user. */}
@@ -134,18 +134,18 @@ export function Companion({ state, size = 92, label, className }: CompanionProps
         }
         .companion[data-state='error'] {
           --companion-glow: var(--state-danger);
-          --companion-deep: #c2453a;
+          --companion-deep: #1a0808;
         }
         .companion[data-state='waiting'] {
-          --companion-glow: var(--state-confirm);
-          --companion-deep: #d98a3a;
+          --companion-glow: var(--coral);
+          --companion-deep: #1a1008;
         }
         .companion[data-state='quiet'] {
-          --companion-glow: var(--ink-muted);
+          --companion-glow: var(--ink-faint);
         }
         .companion[data-state='off'] {
           --companion-glow: var(--ink-faint);
-          opacity: 0.5;
+          opacity: 0.4;
         }
         .companion__art {
           width: 100%;
@@ -179,20 +179,20 @@ export function Companion({ state, size = 92, label, className }: CompanionProps
         }
         .companion__rings circle {
           fill: none;
-          stroke: var(--accent);
+          stroke: var(--cyan);
           stroke-width: 2.4;
           transform-origin: 100px 100px;
         }
         .companion__arcs {
           fill: none;
-          stroke: var(--state-thinking);
+          stroke: var(--accent);
           stroke-width: 3;
           stroke-linecap: round;
           transform-origin: 100px 100px;
         }
         .companion__waves circle {
           fill: none;
-          stroke: var(--coral);
+          stroke: var(--cyan);
           stroke-width: 2.4;
           transform-origin: 100px 100px;
         }
