@@ -30,6 +30,105 @@ const PRESET_PROMPTS = [
   { label: 'Fetch web page', utterance: 'Alexa, check if example.com is reachable', tool: 'web.fetch', args: { url: 'https://example.com' } },
 ]
 
+const LOG_BG: Record<StepLog['type'], string> = {
+  voice: '#022c22',
+  agent: '#172554',
+  'mcp-req': '#312e81',
+  'mcp-resp': '#0f172a',
+  speech: '#3b0764',
+}
+
+const LOG_ICON: Record<StepLog['type'], string> = {
+  voice: '🎤',
+  agent: '🤖',
+  'mcp-req': '→',
+  'mcp-resp': '←',
+  speech: '🔊',
+}
+
+function summariseJson(type: StepLog['type'], raw: unknown): string | null {
+  if (!raw || typeof raw !== 'object') return null
+  const r = raw as Record<string, unknown>
+  if (type === 'mcp-resp') {
+    const result = r['result'] as Record<string, unknown> | undefined
+    if (!result) return null
+    const sc = result['structuredContent'] as Record<string, unknown> | undefined
+    if (sc) {
+      if (sc['passed'] !== undefined) return sc['passed'] ? '✅ All tests passed' : '❌ Tests had failures'
+      if (sc['platform']) return `💻 ${sc['platform']} · ${sc['cpu_count'] ?? '?'} cores`
+      if (sc['diff']) return `📝 ${String(sc['diff']).slice(0, 80)}…`
+      if (sc['url']) return `🌐 ${sc['url']}`
+    }
+    const content = result['content'] as Array<Record<string, string>> | undefined
+    if (content?.[0]?.text) return content[0].text.slice(0, 120)
+  }
+  return null
+}
+
+function LogEntry({ log }: { log: StepLog }) {
+  const [expanded, setExpanded] = useState(false)
+  const summary = log.rawJson ? summariseJson(log.type, log.rawJson) : null
+
+  return (
+    <div
+      style={{
+        padding: '8px 12px',
+        borderRadius: 6,
+        background: LOG_BG[log.type] ?? '#0f172a',
+        border: '1px solid rgba(255,255,255,0.08)',
+        fontSize: 13,
+      }}
+    >
+      <div style={{ display: 'flex', justifyContent: 'space-between', color: '#94a3b8', fontSize: 11, marginBottom: 2 }}>
+        <span style={{ fontWeight: 600, textTransform: 'uppercase' }}>
+          {LOG_ICON[log.type]} {log.type}
+        </span>
+        <span>{log.timestamp}</span>
+      </div>
+      <div style={{ color: '#f8fafc', fontWeight: 500 }}>{log.text}</div>
+      {summary && (
+        <div style={{ marginTop: 4, color: '#7dd3fc', fontSize: 12, fontStyle: 'italic' }}>
+          {summary}
+        </div>
+      )}
+      {log.rawJson && (
+        <button
+          type="button"
+          onClick={() => setExpanded((v) => !v)}
+          style={{
+            marginTop: 4,
+            background: 'none',
+            border: 'none',
+            cursor: 'pointer',
+            color: '#475569',
+            fontSize: 11,
+            padding: 0,
+            textDecoration: 'underline',
+          }}
+        >
+          {expanded ? '▲ Hide raw JSON' : '▼ View raw JSON'}
+        </button>
+      )}
+      {expanded && log.rawJson && (
+        <pre
+          style={{
+            margin: '4px 0 0',
+            padding: 8,
+            background: '#020617',
+            borderRadius: 4,
+            fontSize: 11,
+            color: '#38bdf8',
+            overflowX: 'auto',
+            maxHeight: 200,
+          }}
+        >
+          {JSON.stringify(log.rawJson, null, 2)}
+        </pre>
+      )}
+    </div>
+  )
+}
+
 export function AlexaPlusSimulator({
   speaker,
   speechEnabled = true,
@@ -368,46 +467,7 @@ export function AlexaPlusSimulator({
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 10, maxHeight: 420, overflowY: 'auto' }}>
               {logs.map((log, idx) => (
-                <div
-                  key={idx}
-                  style={{
-                    padding: '8px 12px',
-                    borderRadius: 6,
-                    background:
-                      log.type === 'voice'
-                        ? '#022c22'
-                        : log.type === 'agent'
-                        ? '#172554'
-                        : log.type === 'mcp-req'
-                        ? '#312e81'
-                        : log.type === 'speech'
-                        ? '#3b0764'
-                        : '#0f172a',
-                    border: '1px solid rgba(255,255,255,0.08)',
-                    fontSize: 13,
-                  }}
-                >
-                  <div style={{ display: 'flex', justifyContent: 'space-between', color: '#94a3b8', fontSize: 11, marginBottom: 2 }}>
-                    <span style={{ fontWeight: 600, textTransform: 'uppercase' }}>{log.type}</span>
-                    <span>{log.timestamp}</span>
-                  </div>
-                  <div style={{ color: '#f8fafc', fontWeight: 500 }}>{log.text}</div>
-                  {log.rawJson ? (
-                    <pre
-                      style={{
-                        margin: '6px 0 0',
-                        padding: 8,
-                        background: '#020617',
-                        borderRadius: 4,
-                        fontSize: 11,
-                        color: '#38bdf8',
-                        overflowX: 'auto',
-                      }}
-                    >
-                      {JSON.stringify(log.rawJson, null, 2)}
-                    </pre>
-                  ) : null}
-                </div>
+                <LogEntry key={idx} log={log} />
               ))}
             </div>
           )}

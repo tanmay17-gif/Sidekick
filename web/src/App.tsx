@@ -11,6 +11,59 @@ import { MovieBuddy } from './components/MovieBuddy'
 import { SidekickMark } from './components/icons'
 import { VoiceSurface } from './components/VoiceSurface'
 import { AlexaPlusSimulator } from './components/AlexaPlusSimulator'
+import { ENDPOINTS } from '@/lib/api/endpoints'
+import type { SidekickResponse } from '@/lib/api/types'
+
+/**
+ * Destinations the browser opens locally (execution_target=="client").
+ * Kept in sync with sidekick/tools/local.py:MEDIA_DESTINATIONS.
+ */
+const CLIENT_DESTINATIONS: Record<string, string> = {
+  spotify: 'https://open.spotify.com',
+  youtube: 'https://www.youtube.com',
+  netflix: 'https://www.netflix.com',
+  apple_music: 'https://music.apple.com',
+  twitch: 'https://www.twitch.tv',
+  vlc: 'https://www.videolan.org/vlc',
+  wikipedia: 'https://www.wikipedia.org',
+  google: 'https://www.google.com',
+}
+
+/** Report a client-executed action back to the backend. */
+async function reportClientAction(
+  actionId: string,
+  sessionId: string,
+  ok: boolean,
+  url?: string,
+) {
+  try {
+    await fetch(ENDPOINTS.complete(actionId), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-sidekick-session-id': sessionId },
+      body: JSON.stringify({ action_id: actionId, ok, url }),
+    })
+  } catch {
+    // Non-critical: the backend will time the action out if we don't report
+  }
+}
+
+/** Execute any client-side actions in a response (media.open, etc.). */
+function dispatchClientActions(response: SidekickResponse, sessionId: string) {
+  for (const action of response.action_plan ?? []) {
+    const result = action.result as Record<string, unknown> | null | undefined
+    if (!result || result['execution_target'] !== 'client') continue
+    if (action.tool === 'media.open') {
+      const dest = String((action.arguments as Record<string, unknown>)?.destination ?? '')
+      const url = CLIENT_DESTINATIONS[dest] ?? null
+      if (url) {
+        window.open(url, '_blank', 'noopener,noreferrer')
+        void reportClientAction(action.action_id, sessionId, true, url)
+      } else {
+        void reportClientAction(action.action_id, sessionId, false)
+      }
+    }
+  }
+}
 
 type View = 'ask' | 'alexa-plus' | 'movie' | 'games' | 'control'
 
@@ -111,6 +164,14 @@ export function App() {
       handleUtterance(transcript, 'voice')
     },
   })
+
+  // Dispatch client-side actions (media.open → window.open) as responses arrive.
+  useEffect(() => {
+    const record = sidekick.requests[sidekick.requests.length - 1]
+    if (!record || record.status !== 'answered' || !record.response) return
+    dispatchClientActions(record.response, sidekick.sessionId)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sidekick.requests])
 
   // Speak the newest assistant response once, when speech output is enabled.
   useEffect(() => {

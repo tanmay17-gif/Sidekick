@@ -310,11 +310,30 @@ export function MovieBuddy({
 
             {buddy.player.mediaError ? (
               <div className="stage__error">
-                <div>
-                  <p style={{ color: 'var(--ink)' }}>{buddy.player.mediaError}</p>
-                  <p className="hint" style={{ marginTop: 'var(--space-2)' }}>
-                    Choose another film - the rest of the interface keeps working.
+                <div style={{ textAlign: 'center', padding: '24px 16px' }}>
+                  <p style={{ color: 'var(--ink)', fontWeight: 600, marginBottom: 8 }}>
+                    ⚠️ {buddy.player.mediaError}
                   </p>
+                  <p className="hint" style={{ marginBottom: 16 }}>
+                    Your browser couldn&apos;t play that format. Try loading a video from your device, or open a streaming film directly.
+                  </p>
+                  <div style={{ display: 'flex', gap: 8, justifyContent: 'center', flexWrap: 'wrap' }}>
+                    <button
+                      type="button"
+                      className="btn btn--primary btn--sm"
+                      onClick={() => fileInputRef.current?.click()}
+                    >
+                      📂 Open a local video
+                    </button>
+                    <a
+                      href="https://archive.org/download/Tears-of-Steel/tears_of_steel_720p.mp4"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="btn btn--sm"
+                    >
+                      🎬 Open Tears of Steel (CC)
+                    </a>
+                  </div>
                 </div>
               </div>
             ) : null}
